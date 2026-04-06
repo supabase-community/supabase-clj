@@ -35,15 +35,15 @@ jobs:
 
       - name: Run tests
         working-directory: ${{ matrix.module }}
-        run: clj -M:test
+        run: clojure -M:test
 
       - name: Build JAR
         working-directory: ${{ matrix.module }}
-        run: clj -T:build jar
+        run: clojure -T:build jar
 
       - name: Deploy to Clojars
         working-directory: ${{ matrix.module }}
         env:
           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
-        run: clj -T:build deploy
+        run: clojure -T:build deploy

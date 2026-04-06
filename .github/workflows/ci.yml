@@ -12,13 +12,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - uses: DeLaGuardo/setup-clojure@13.2
         with:
           cli: latest
           clj-kondo: latest
 
       - name: Lint core
-        run: clj-kondo --lint core/src
+        run: clj-kondo --lint core/src --fail-level error
+
+      - name: Check formatting
+        working-directory: core
+        run: clojure -M:fmt check src test
 
   test:
     runs-on: ubuntu-latest
@@ -41,9 +50,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: m2-${{ hashFiles('core/deps.edn') }}
+          key: m2-${{ hashFiles('**/deps.edn') }}
           restore-keys: m2-
 
       - name: Test core
         working-directory: core
-        run: clj -M:test
+        run: clojure -M:test

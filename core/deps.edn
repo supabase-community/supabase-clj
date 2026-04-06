@@ -11,6 +11,9 @@
           :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
           :main-opts ["-m" "kaocha.runner"]}
 
+   :fmt {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.0"}}
+         :main-opts ["-m" "cljfmt.main"]}
+
    :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}
                   slipset/deps-deploy {:mvn/version "0.2.2"}}
            :ns-default build}}}

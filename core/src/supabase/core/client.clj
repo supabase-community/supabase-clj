@@ -186,7 +186,7 @@
   (let [opts (or opts {})
         access-token (or (:access-token opts) api-key)
         storage-url (maybe-transform-storage-url
-                      (str base-url "/storage/v1") opts)
+                     (str base-url "/storage/v1") opts)
         storage-key (or (get-in opts [:auth :storage-key])
                         (default-storage-key base-url))
         user-headers (get-in opts [:global :headers] {})
@@ -209,8 +209,8 @@
     (if (m/validate Client decoded)
       decoded
       (error/anomaly :cognitect.anomalies/incorrect
-        {:cognitect.anomalies/message "Invalid client configuration"
-         :malli/explanation (m/explain Client decoded)}))))
+                     {:cognitect.anomalies/message "Invalid client configuration"
+                      :malli/explanation (m/explain Client decoded)}))))
 
 (defn update-access-token
   "Returns a new client with the given `access-token` swapped in.
@@ -222,4 +222,4 @@
   (if (m/validate Client client)
     (assoc client :access-token access-token)
     (error/anomaly :cognitect.anomalies/incorrect
-      {:cognitect.anomalies/message "Invalid client map"})))
+                   {:cognitect.anomalies/message "Invalid client map"})))

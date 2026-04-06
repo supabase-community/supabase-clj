@@ -44,7 +44,8 @@
           (http/with-method :post)
           (http/with-body {:name \"world\"})
           (http/execute-async))"
-  (:require [hato.client :as hc]
+  (:require [clojure.string :as str]
+            [hato.client :as hc]
             [jsonista.core :as json]
             [supabase.core.error :as error]))
 
@@ -85,7 +86,7 @@
           (with-service-url :auth-url \"/token\"))"
   [req service-url-key path]
   (let [base-url (get-in req [:client service-url-key])
-        service (keyword (first (clojure.string/split (name service-url-key) #"-")))]
+        service (keyword (first (str/split (name service-url-key) #"-")))]
     (assoc req
            :url (str base-url path)
            :service service)))

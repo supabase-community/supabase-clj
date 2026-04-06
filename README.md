@@ -65,6 +65,23 @@ Errors are represented as [cognitect/anomalies](https://github.com/cognitect-lab
     (println "Success:" (:body result))))
 ```
 
+## Development
+
+Each sub-project has its own `:test` and `:fmt` aliases. Run from within the module directory:
+
+```bash
+cd core
+
+# Run tests (Kaocha)
+clojure -M:test
+
+# Check formatting (cljfmt)
+clojure -M:fmt check src test
+
+# Fix formatting
+clojure -M:fmt fix src test
+```
+
 ## License
 
 MIT

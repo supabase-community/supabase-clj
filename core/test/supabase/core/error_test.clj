@@ -12,9 +12,9 @@
 
   (testing "returns true for anomaly maps with extra fields"
     (is (true? (error/anomaly?
-                 {:cognitect.anomalies/category :cognitect.anomalies/fault
-                  :cognitect.anomalies/message "boom"
-                  :supabase/service :auth}))))
+                {:cognitect.anomalies/category :cognitect.anomalies/fault
+                 :cognitect.anomalies/message "boom"
+                 :supabase/service :auth}))))
 
   (testing "returns false for nil"
     (is (false? (error/anomaly? nil))))
@@ -39,8 +39,8 @@
 
   (testing "creates anomaly with extra fields"
     (let [a (error/anomaly :cognitect.anomalies/forbidden
-              {:cognitect.anomalies/message "Access denied"
-               :supabase/service :storage})]
+                           {:cognitect.anomalies/message "Access denied"
+                            :supabase/service :storage})]
       (is (= :cognitect.anomalies/forbidden (:cognitect.anomalies/category a)))
       (is (= "Access denied" (:cognitect.anomalies/message a)))
       (is (= :storage (:supabase/service a))))))

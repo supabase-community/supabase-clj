@@ -136,11 +136,17 @@ Anomaly-based error handling following [cognitect/anomalies](https://github.com/
 ## Development
 
 ```bash
-# Run all tests
-clj -M:test
+# Run all tests (Kaocha)
+clojure -M:test
 
 # Run specific test namespace
-clj -M:test --focus :unit --test-id supabase.core.client-test
+clojure -M:test --focus supabase.core.client-test
+
+# Check formatting (cljfmt)
+clojure -M:fmt check src test
+
+# Fix formatting
+clojure -M:fmt fix src test
 ```
 
 ## License

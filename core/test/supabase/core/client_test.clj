@@ -77,7 +77,7 @@
 
   (testing "custom storage key is preserved"
     (let [c (client/make-client base-url api-key
-              :auth {:storage-key "custom-key"})]
+                                :auth {:storage-key "custom-key"})]
       (is (= "custom-key" (get-in c [:auth :storage-key]))))))
 
 ;; ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@
 
   (testing "custom headers merge with defaults"
     (let [c (client/make-client base-url api-key
-              :global {:headers {"x-custom" "val"}})]
+                                :global {:headers {"x-custom" "val"}})]
       (is (= "val" (get-in c [:global :headers "x-custom"])))
       (is (some? (get-in c [:global :headers "x-client-info"]))))))
 
@@ -114,7 +114,7 @@
 
   (testing "with use-new-hostname, storage URL uses storage subdomain"
     (let [c (client/make-client base-url api-key
-              :storage {:use-new-hostname true})]
+                                :storage {:use-new-hostname true})]
       (is (= "https://abc123.storage.supabase.co/storage/v1" (:storage-url c))))))
 
 ;; ---------------------------------------------------------------------------
