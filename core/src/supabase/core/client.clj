@@ -43,7 +43,7 @@
             [supabase.core.error :as error]))
 
 ;; x-release-please-start-version
-(def ^:private version "0.1.0")
+(def ^:private version "0.1.1")
 ;; x-release-please-end
 
 ;; ---------------------------------------------------------------------------

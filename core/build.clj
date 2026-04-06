@@ -3,7 +3,7 @@
             [deps-deploy.deps-deploy :as dd]
             [clojure.string :as str]))
 
-(def lib 'io.supabase/core)
+(def lib 'io.github.supabase-community/core)
 (def version (str/trim (slurp "version.txt")))
 
 (def class-dir "target/classes")
@@ -20,7 +20,11 @@
                 :scm {:url "https://github.com/supabase-community/supabase-clj"
                       :connection "scm:git:git://github.com/supabase-community/supabase-clj.git"
                       :developerConnection "scm:git:ssh://git@github.com/supabase-community/supabase-clj.git"
-                      :tag (str "core-v" version)}})
+                      :tag (str "core-v" version)}
+                :pom-data [[:licenses
+                            [:license
+                             [:name "MIT"]
+                             [:url "https://opensource.org/licenses/MIT"]]]]})
   (b/copy-dir {:src-dirs ["src"] :target-dir class-dir})
   (b/jar {:class-dir class-dir :jar-file jar-file})
   (println (str "Built " jar-file)))

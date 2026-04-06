@@ -1,4 +1,4 @@
-# io.supabase/core
+# io.github.supabase-community/core
 
 Core module for the Supabase Clojure SDK. Provides client configuration, HTTP request building, and error handling used by all service modules.
 
@@ -8,7 +8,7 @@ Core module for the Supabase Clojure SDK. Provides client configuration, HTTP re
 
 ```clojure
 ;; deps.edn
-{:deps {io.supabase/core {:mvn/version "0.1.0"}}}
+{:deps {io.github.supabase-community/core {:mvn/version "0.1.1"}}}
 ```
 
 <!-- x-release-please-end -->
@@ -56,7 +56,7 @@ Creates and manages immutable client configuration maps.
  :functions-url  "https://abc123.supabase.co/functions/v1"
  :realtime-url   "https://abc123.supabase.co/realtime/v1"
  :db             {:schema "public"}
- :global         {:headers {"x-client-info" "supabase-clj/0.1.0"}}
+ :global         {:headers {"x-client-info" "supabase-clj/0.1.1"}}
  :auth           {:auto-refresh-token true
                   :debug false
                   :detect-session-in-url true

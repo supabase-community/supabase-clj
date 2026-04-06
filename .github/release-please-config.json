@@ -16,7 +16,7 @@
   "packages": {
     "core": {
       "release-type": "simple",
-      "package-name": "io.supabase/core",
+      "package-name": "io.github.supabase-community/core",
       "component": "core",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
@@ -32,7 +32,7 @@
     },
     ".": {
       "release-type": "simple",
-      "package-name": "io.supabase/core",
+      "package-name": "io.github.supabase-community/core",
       "component": "root-docs",
       "skip-github-release": true,
       "extra-files": [

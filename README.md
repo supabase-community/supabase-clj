@@ -7,12 +7,12 @@ Supabase Community Clojure SDK
 ```clojure
 ;; deps.edn
 {:deps
-  {io.supabase/core      {:mvn/version "0.1.0"}  ;; base SDK
-   io.supabase/auth      {:mvn/version "0.1.0"}  ;; auth integration
-   io.supabase/postgrest {:mvn/version "0.1.0"}  ;; postgrest integration
-   io.supabase/storage   {:mvn/version "0.1.0"}  ;; storage integration
-   io.supabase/functions {:mvn/version "0.1.0"}  ;; edge functions integration
-   io.supabase/realtime  {:mvn/version "0.1.0"}}} ;; realtime integration
+  {io.github.supabase-community/core      {:mvn/version "0.1.1"}  ;; base SDK
+   io.github.supabase-community/auth      {:mvn/version "0.1.0"}  ;; auth integration
+   io.github.supabase-community/postgrest {:mvn/version "0.1.0"}  ;; postgrest integration
+   io.github.supabase-community/storage   {:mvn/version "0.1.0"}  ;; storage integration
+   io.github.supabase-community/functions {:mvn/version "0.1.0"}  ;; edge functions integration
+   io.github.supabase-community/realtime  {:mvn/version "0.1.0"}}} ;; realtime integration
 ```
 
 <!-- x-release-please-end -->
