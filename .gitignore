@@ -1,0 +1,18 @@
+# Clojure
+.cpcache/
+.nrepl-port
+target/
+classes/
+*.jar
+
+# Nix
+result
+.direnv/
+
+# Editor
+.calva/
+.lsp/
+.clj-kondo/.cache/
+
+# OS
+.DS_Store
