@@ -42,7 +42,9 @@
             [malli.transform :as mt]
             [supabase.core.error :as error]))
 
+;; x-release-please-start-version
 (def ^:private version "0.1.0")
+;; x-release-please-end
 
 ;; ---------------------------------------------------------------------------
 ;; Schemas

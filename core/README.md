@@ -4,10 +4,14 @@ Core module for the Supabase Clojure SDK. Provides client configuration, HTTP re
 
 ## Installation
 
+<!-- x-release-please-start-version -->
+
 ```clojure
 ;; deps.edn
 {:deps {io.supabase/core {:mvn/version "0.1.0"}}}
 ```
+
+<!-- x-release-please-end -->
 
 ## Quick Start
 
@@ -119,24 +123,24 @@ Anomaly-based error handling following [cognitect/anomalies](https://github.com/
 
 #### Anomaly Category Mapping
 
-| HTTP Status | Anomaly Category | Code |
-|-------------|-----------------|------|
-| 400 | `:cognitect.anomalies/incorrect` | `:bad-request` |
-| 401, 403 | `:cognitect.anomalies/forbidden` | `:unauthorized`, `:forbidden` |
-| 404 | `:cognitect.anomalies/not-found` | `:not-found` |
-| 409 | `:cognitect.anomalies/conflict` | `:resource-already-exists` |
-| 429 | `:cognitect.anomalies/busy` | `:too-many-requests` |
-| 500 | `:cognitect.anomalies/fault` | `:server-error` |
-| 503 | `:cognitect.anomalies/unavailable` | `:service-unavailable` |
+| HTTP Status | Anomaly Category                   | Code                          |
+| ----------- | ---------------------------------- | ----------------------------- |
+| 400         | `:cognitect.anomalies/incorrect`   | `:bad-request`                |
+| 401, 403    | `:cognitect.anomalies/forbidden`   | `:unauthorized`, `:forbidden` |
+| 404         | `:cognitect.anomalies/not-found`   | `:not-found`                  |
+| 409         | `:cognitect.anomalies/conflict`    | `:resource-already-exists`    |
+| 429         | `:cognitect.anomalies/busy`        | `:too-many-requests`          |
+| 500         | `:cognitect.anomalies/fault`       | `:server-error`               |
+| 503         | `:cognitect.anomalies/unavailable` | `:service-unavailable`        |
 
 ## Development
 
 ```bash
-# Run tests
+# Run all tests
 clj -M:test
 
 # Run specific test namespace
-clj -M:test -n supabase.core.client-test
+clj -M:test --focus :unit --test-id supabase.core.client-test
 ```
 
 ## License
