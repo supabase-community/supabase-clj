@@ -12,7 +12,7 @@ result
 # Editor
 .calva/
 .lsp/
-.clj-kondo/.cache/
+**/.clj-kondo/
 
 # OS
 .DS_Store
