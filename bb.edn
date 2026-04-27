@@ -1,0 +1,3 @@
+{:tasks
+ {new-module {:doc "Scaffold a new module under this monorepo. Usage: bb new-module <name>"
+              :task (load-file "bin/new_module.clj")}}}
