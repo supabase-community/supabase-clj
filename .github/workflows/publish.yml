@@ -3,6 +3,12 @@ name: Publish to Clojars
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to publish (e.g. core-v0.1.2 or auth-v0.1.0)"
+        required: true
+        type: string
 
 jobs:
   publish:
@@ -12,22 +18,36 @@ jobs:
         # Add a module here once it has build.clj + version.txt + :build alias
         # AND a corresponding entry in .github/release-please-config.json.
         module: [core, auth]
-    # Skip rows whose module name doesn't match the released tag.
-    # Tag format: `<module>-vX.Y.Z` (release-please convention).
-    if: startsWith(github.event.release.tag_name, format('{0}-v', matrix.module))
+    env:
+      TAG_NAME: ${{ inputs.tag_name || github.event.release.tag_name }}
     steps:
+      - name: Skip if tag does not match this module
+        id: guard
+        run: |
+          if [[ "$TAG_NAME" == ${{ matrix.module }}-v* ]]; then
+            echo "match=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "match=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.guard.outputs.match == 'true'
+        with:
+          ref: ${{ env.TAG_NAME }}
 
       - uses: actions/setup-java@v4
+        if: steps.guard.outputs.match == 'true'
         with:
           distribution: temurin
           java-version: "21"
 
       - uses: DeLaGuardo/setup-clojure@13.2
+        if: steps.guard.outputs.match == 'true'
         with:
           cli: latest
 
       - name: Cache Maven deps
+        if: steps.guard.outputs.match == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
@@ -35,14 +55,17 @@ jobs:
           restore-keys: m2-
 
       - name: Run module tests
+        if: steps.guard.outputs.match == 'true'
         working-directory: ${{ matrix.module }}
         run: clojure -M:test
 
       - name: Build JAR
+        if: steps.guard.outputs.match == 'true'
         working-directory: ${{ matrix.module }}
         run: clojure -T:build jar
 
       - name: Deploy to Clojars
+        if: steps.guard.outputs.match == 'true'
         working-directory: ${{ matrix.module }}
         env:
           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
