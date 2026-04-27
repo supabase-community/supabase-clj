@@ -7,7 +7,7 @@ Supabase Community Clojure SDK
 ```clojure
 ;; deps.edn
 {:deps
-  {io.github.supabase-community/core      {:mvn/version "0.1.1"}  ;; base SDK
+  {io.github.supabase-community/core      {:mvn/version "0.2.0"}  ;; base SDK
    io.github.supabase-community/auth      {:mvn/version "0.1.0"}  ;; auth integration
    io.github.supabase-community/postgrest {:mvn/version "0.1.0"}  ;; postgrest integration
    io.github.supabase-community/storage   {:mvn/version "0.1.0"}  ;; storage integration

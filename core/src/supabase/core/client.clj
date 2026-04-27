@@ -32,7 +32,7 @@
        :functions-url  \"https://abc.supabase.co/functions/v1\"
        :realtime-url   \"https://abc.supabase.co/realtime/v1\"
        :db             {:schema \"public\"}
-       :global         {:headers {\"x-client-info\" \"supabase-clj/0.1.0\"}}
+       :global         {:headers {\"x-client-info\" \"supabase-clj/0.2.0\"}}
        :auth           {:auto-refresh-token true, :flow-type \"implicit\", ...}
        :storage        {:use-new-hostname false}}
 
