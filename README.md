@@ -20,7 +20,7 @@ Supabase Community Clojure SDK
 Individual product client documentation:
 
 - [Core](core/)
-- Auth (coming soon)
+- [Auth](auth/)
 - PostgREST (coming soon)
 - Storage (coming soon)
 - Functions (coming soon)
@@ -67,20 +67,20 @@ Errors are represented as [cognitect/anomalies](https://github.com/cognitect-lab
 
 ## Development
 
-Each sub-project has its own `:test` and `:fmt` aliases. Run from within the module directory:
+Run from the repo root — root `deps.edn` and `tests.edn` aggregate every module:
 
 ```bash
-cd core
-
-# Run tests (Kaocha)
+# Run all tests across modules (Kaocha)
 clojure -M:test
 
 # Check formatting (cljfmt)
-clojure -M:fmt check src test
+clojure -M:fmt check core/src core/test auth/src auth/test
 
 # Fix formatting
-clojure -M:fmt fix src test
+clojure -M:fmt fix core/src core/test auth/src auth/test
 ```
+
+Each module also has its own `:test` alias, so `cd core && clojure -M:test` works for module-scoped runs.
 
 ## License
 

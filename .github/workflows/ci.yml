@@ -22,12 +22,11 @@ jobs:
           cli: latest
           clj-kondo: latest
 
-      - name: Lint core
-        run: clj-kondo --lint core/src --fail-level error
+      - name: Lint all modules
+        run: clj-kondo --lint core/src core/test auth/src auth/test --fail-level error
 
       - name: Check formatting
-        working-directory: core
-        run: clojure -M:fmt check src test
+        run: clojure -M:fmt check core/src core/test auth/src auth/test
 
   test:
     runs-on: ubuntu-latest
@@ -53,6 +52,5 @@ jobs:
           key: m2-${{ hashFiles('**/deps.edn') }}
           restore-keys: m2-
 
-      - name: Test core
-        working-directory: core
+      - name: Run all tests
         run: clojure -M:test
