@@ -15,6 +15,7 @@
           clojure
           clj-kondo
           clojure-lsp
+          babashka
         ];
       };
     });

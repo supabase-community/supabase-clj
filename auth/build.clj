@@ -5,10 +5,19 @@
 
 (def lib 'io.github.supabase-community/auth)
 (def version (str/trim (slurp "version.txt")))
+(def core-version (str/trim (slurp "../core/version.txt")))
 
 (def class-dir "target/classes")
 (def jar-file (format "target/%s-%s.jar" (name lib) version))
-(def basis (delay (b/create-basis {:project "deps.edn"})))
+
+;; Build the basis from an inline project map so the published pom references
+;; core via its mvn coordinate instead of the dev-time :local/root path in
+;; deps.edn (Clojars rejects local-path deps).
+(def basis
+  (delay (b/create-basis
+          {:project {:deps {'org.clojure/clojure {:mvn/version "1.11.2"}
+                            'io.github.supabase-community/core
+                            {:mvn/version core-version}}}})))
 
 (defn jar [_]
   (b/delete {:path "target"})
@@ -20,7 +29,7 @@
                 :scm {:url "https://github.com/supabase-community/supabase-clj"
                       :connection "scm:git:git://github.com/supabase-community/supabase-clj.git"
                       :developerConnection "scm:git:ssh://git@github.com/supabase-community/supabase-clj.git"
-                      :tag (str "core-v" version)}
+                      :tag (str "auth-v" version)}
                 :pom-data [[:licenses
                             [:license
                              [:name "MIT"]

@@ -67,7 +67,7 @@
     "auth": {
       "release-type": "simple",
       "package-name": "io.github.supabase-community/auth",
-      "component": "core",
+      "component": "auth",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {

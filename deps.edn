@@ -1,15 +1,17 @@
 {:aliases
-  {:core {:extra-deps {io.supabase/core {:local/root "core"}}
-          :extra-paths ["core/src" "core/test"]}
+ {:core {:extra-deps {io.github.supabase-community/core
+                      {:local/root "core"}}
+         :extra-paths ["core/src" "core/test"]}
 
-   :auth {:extra-deps {io.supabase/core {:local/root "core"}}
-          :extra-paths ["auth/src" "auth/test"]}
+  :auth {:extra-deps {io.github.supabase-community/auth
+                      {:local/root "core"}}
+         :extra-paths ["auth/src" "auth/test"]}
 
-   :fmt {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.0"}}
-         :main-opts ["-m" "cljfmt.main"]}
+  :fmt {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.0"}}
+        :main-opts ["-m" "cljfmt.main"]}
 
-   :test {:extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
-                       io.github.supabase-community/core {:local/root "core"}
-                       io.github.supabase-community/auth {:local/root "auth"}}
-          :extra-paths ["core/test" "auth/test"]
-          :main-opts ["-m" "kaocha.runner"]}}}
+  :test {:extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
+                      io.github.supabase-community/core {:local/root "core"}
+                      io.github.supabase-community/auth {:local/root "auth"}}
+         :extra-paths ["core/test" "auth/test"]
+         :main-opts ["-m" "kaocha.runner"]}}}

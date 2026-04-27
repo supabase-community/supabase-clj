@@ -1,9 +1,13 @@
 {:paths ["src"]
 
  :deps
- {io.github.supabase-community/core {:mvn/version "0.1.1"}}
+ {io.github.supabase-community/core {:local/root "../core"}}
 
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
-         :main-opts ["-m" "kaocha.runner"]}}}
+         :main-opts ["-m" "kaocha.runner"]}
+
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}
+                 slipset/deps-deploy {:mvn/version "0.2.2"}}
+          :ns-default build}}}
