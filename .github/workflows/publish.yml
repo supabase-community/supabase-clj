@@ -9,11 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          - module: core
-            tag-prefix: core
-    # Only run if the release tag matches this module
-    if: startsWith(github.event.release.tag_name, 'core-v')
+        # Add a module here once it has build.clj + version.txt + :build alias
+        # AND a corresponding entry in .github/release-please-config.json.
+        module: [core, auth]
+    # Skip rows whose module name doesn't match the released tag.
+    # Tag format: `<module>-vX.Y.Z` (release-please convention).
+    if: startsWith(github.event.release.tag_name, format('{0}-v', matrix.module))
     steps:
       - uses: actions/checkout@v4
 
@@ -30,10 +31,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: m2-${{ hashFiles('core/deps.edn') }}
+          key: m2-${{ hashFiles('**/deps.edn') }}
           restore-keys: m2-
 
-      - name: Run tests
+      - name: Run module tests
         working-directory: ${{ matrix.module }}
         run: clojure -M:test
 

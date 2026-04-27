@@ -223,3 +223,11 @@
     (assoc client :access-token access-token)
     (error/anomaly :cognitect.anomalies/incorrect
                    {:cognitect.anomalies/message "Invalid client map"})))
+
+(defn ensure-client
+  "Returns nil if `client` matches the Client schema, otherwise an anomaly."
+  [client]
+  (when-not (m/validate Client client)
+    (error/anomaly :cognitect.anomalies/incorrect
+                   {:cognitect.anomalies/message "Invalid client map"
+                    :supabase/service :auth})))
