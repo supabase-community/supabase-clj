@@ -126,6 +126,16 @@
   [req params]
   (update req :query merge params))
 
+(defn with-response-as
+  "Sets how Hato should coerce the response body. Defaults to `:string`,
+  which `handle-response` then JSON-decodes. Use `:byte-array`, `:stream`,
+  or `:input-stream` for binary responses (storage downloads). Non-string
+  bodies skip the JSON parse step.
+
+      (with-response-as req :byte-array)"
+  [req as]
+  (assoc req :response-as as))
+
 ;; ---------------------------------------------------------------------------
 ;; Response handling
 ;; ---------------------------------------------------------------------------
@@ -143,12 +153,17 @@
   "Converts a Hato response into either a success map or an anomaly map.
 
   Responses with status < 400 return `{:status s, :body b, :headers h}`.
-  Responses with status >= 400 return an anomaly map via `error/from-http-response`."
-  [{:keys [status body headers]} service]
-  (let [parsed-body (parse-response-body body)]
-    (if (< status 400)
-      {:status status :body parsed-body :headers headers}
-      (error/from-http-response status parsed-body service))))
+  Responses with status >= 400 return an anomaly map via `error/from-http-response`.
+
+  When `parse-body?` is false (binary response), the body is passed through
+  unchanged on success. Error responses still attempt JSON parsing so the
+  caller gets a structured anomaly."
+  [{:keys [status body headers]} service parse-body?]
+  (if (< status 400)
+    {:status status
+     :body (if parse-body? (parse-response-body body) body)
+     :headers headers}
+    (error/from-http-response status (parse-response-body body) service)))
 
 ;; ---------------------------------------------------------------------------
 ;; Execution
@@ -156,11 +171,11 @@
 
 (defn- build-hato-request
   "Transforms an internal request map into Hato's expected format."
-  [{:keys [method url headers query body]}]
+  [{:keys [method url headers query body response-as]}]
   (cond-> {:method method
            :url url
            :headers headers
-           :as :string}
+           :as (or response-as :string)}
     (seq query) (assoc :query-params query)
     body        (assoc :body body)))
 
@@ -175,10 +190,10 @@
           (with-body {:grant-type \"password\" :email \"a@b.com\" :password \"x\"})
           (execute))
       ;; => {:status 200, :body {...}, :headers {...}}"
-  [{:keys [service] :as req}]
+  [{:keys [service response-as] :as req}]
   (try
     (let [resp (hc/request (build-hato-request req))]
-      (handle-response resp service))
+      (handle-response resp service (or (nil? response-as) (= :string response-as))))
     (catch Exception e
       (error/from-exception e service))))
 
@@ -211,12 +226,13 @@
            (with-method :post)
            (with-body {:name \"world\"})
            (execute-async))"
-  [{:keys [service] :as req}]
-  (let [hato-req (build-hato-request req)]
+  [{:keys [service response-as] :as req}]
+  (let [hato-req (build-hato-request req)
+        parse? (or (nil? response-as) (= :string response-as))]
     (-> (hc/request (assoc hato-req :async? true))
         (.thenApply (reify java.util.function.Function
                       (apply [_ resp]
-                        (handle-response resp service))))
+                        (handle-response resp service parse?))))
         (.exceptionally (reify java.util.function.Function
                           (apply [_ ex]
                             (error/from-exception ex service)))))))
