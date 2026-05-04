@@ -1,5 +1,5 @@
 #kaocha/v1
 {:tests [{:id :unit
-          :test-paths ["core/test" "auth/test"]
-          :source-paths ["core/src" "auth/src"]
+          :test-paths ["core/test" "auth/test" "storage/test"]
+          :source-paths ["core/src" "auth/src" "storage/src"]
           :ns-patterns [".*-test$"]}]}

@@ -21,6 +21,7 @@ Individual product client documentation:
 
 - [Core](core/)
 - [Auth](auth/)
+- [Storage](storage/)
 - PostgREST (coming soon)
 - Storage (coming soon)
 - Functions (coming soon)

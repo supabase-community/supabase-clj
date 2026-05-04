@@ -12,6 +12,7 @@
 
   :test {:extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
                       io.github.supabase-community/core {:local/root "core"}
-                      io.github.supabase-community/auth {:local/root "auth"}}
-         :extra-paths ["core/test" "auth/test"]
+                      io.github.supabase-community/auth {:local/root "auth"}
+                      io.github.supabase-community/storage {:local/root "storage"}}
+         :extra-paths ["core/test" "auth/test" "storage/test"]
          :main-opts ["-m" "kaocha.runner"]}}}

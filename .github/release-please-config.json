@@ -76,6 +76,18 @@
         }
       ]
     },
+    "storage": {
+      "release-type": "simple",
+      "package-name": "io.github.supabase-community/storage",
+      "component": "storage",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "README.md"
+        }
+      ]
+    },
     ".": {
       "release-type": "simple",
       "package-name": "io.github.supabase-community/core",
