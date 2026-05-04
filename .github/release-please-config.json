@@ -87,18 +87,6 @@
           "path": "README.md"
         }
       ]
-    },
-    ".": {
-      "release-type": "simple",
-      "package-name": "io.github.supabase-community/core",
-      "component": "root-docs",
-      "skip-github-release": true,
-      "extra-files": [
-        {
-          "type": "generic",
-          "path": "README.md"
-        }
-      ]
     }
   }
 }
