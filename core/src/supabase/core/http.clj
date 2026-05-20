@@ -126,6 +126,21 @@
   [req params]
   (update req :query merge params))
 
+(defn merge-query-param
+  "Appends `value` to the existing value at `key` in the query map, joined
+  by `sep` (default `\",\"`). When the key is absent, sets it to `value`.
+  Useful for PostgREST-style stacked filters where multiple values for the
+  same column must concatenate, not overwrite.
+
+      (merge-query-param req \"order\" \"id.asc\")
+      (merge-query-param req \"order\" \"name.desc\")
+      ;; => {:query {\"order\" \"id.asc,name.desc\"}}"
+  ([req key value] (merge-query-param req key value ","))
+  ([req key value sep]
+   (update-in req [:query key]
+              (fn [existing]
+                (if existing (str existing sep value) value)))))
+
 (defn with-response-as
   "Sets how Hato should coerce the response body. Defaults to `:string`,
   which `handle-response` then JSON-decodes. Use `:byte-array`, `:stream`,
