@@ -23,7 +23,7 @@ Individual product client documentation:
 - [Auth](auth/)
 - [Storage](storage/)
 - [Realtime](realtime/)
-- PostgREST (coming soon)
+- [Postgrest](postgrest/)
 - Functions (coming soon)
 
 ### Clients

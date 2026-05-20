@@ -1,104 +1,94 @@
 {
-  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-  "separate-pull-requests": true,
-  "changelog-sections": [
-    {
-      "type": "feat",
-      "section": "Features"
+  "$schema" : "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "separate-pull-requests" : true,
+  "changelog-sections" : [ {
+    "type" : "feat",
+    "section" : "Features"
+  }, {
+    "type" : "fix",
+    "section" : "Bug Fixes"
+  }, {
+    "type" : "perf",
+    "section" : "Performance Improvements"
+  }, {
+    "type" : "revert",
+    "section" : "Reverts"
+  }, {
+    "type" : "docs",
+    "section" : "Documentation"
+  }, {
+    "type" : "chore",
+    "section" : "Miscellaneous Chores",
+    "hidden" : true
+  }, {
+    "type" : "refactor",
+    "section" : "Code Refactoring"
+  }, {
+    "type" : "test",
+    "section" : "Tests",
+    "hidden" : true
+  }, {
+    "type" : "build",
+    "section" : "Build System",
+    "hidden" : true
+  }, {
+    "type" : "ci",
+    "section" : "Continuous Integration",
+    "hidden" : true
+  } ],
+  "packages" : {
+    "core" : {
+      "release-type" : "simple",
+      "package-name" : "io.github.supabase-community/core",
+      "component" : "core",
+      "changelog-path" : "CHANGELOG.md",
+      "extra-files" : [ {
+        "type" : "generic",
+        "path" : "src/supabase/core/client.clj"
+      }, {
+        "type" : "generic",
+        "path" : "README.md"
+      } ]
     },
-    {
-      "type": "fix",
-      "section": "Bug Fixes"
+    "auth" : {
+      "release-type" : "simple",
+      "package-name" : "io.github.supabase-community/auth",
+      "component" : "auth",
+      "changelog-path" : "CHANGELOG.md",
+      "extra-files" : [ {
+        "type" : "generic",
+        "path" : "README.md"
+      } ]
     },
-    {
-      "type": "perf",
-      "section": "Performance Improvements"
+    "storage" : {
+      "release-type" : "simple",
+      "package-name" : "io.github.supabase-community/storage",
+      "component" : "storage",
+      "changelog-path" : "CHANGELOG.md",
+      "extra-files" : [ {
+        "type" : "generic",
+        "path" : "README.md"
+      } ]
     },
-    {
-      "type": "revert",
-      "section": "Reverts"
+    "realtime" : {
+      "release-type" : "simple",
+      "package-name" : "io.github.supabase-community/realtime",
+      "component" : "realtime",
+      "changelog-path" : "CHANGELOG.md",
+      "extra-files" : [ {
+        "type" : "generic",
+        "path" : "README.md"
+      } ]
     },
-    {
-      "type": "docs",
-      "section": "Documentation"
-    },
-    {
-      "type": "chore",
-      "section": "Miscellaneous Chores",
-      "hidden": true
-    },
-    {
-      "type": "refactor",
-      "section": "Code Refactoring"
-    },
-    {
-      "type": "test",
-      "section": "Tests",
-      "hidden": true
-    },
-    {
-      "type": "build",
-      "section": "Build System",
-      "hidden": true
-    },
-    {
-      "type": "ci",
-      "section": "Continuous Integration",
-      "hidden": true
-    }
-  ],
-  "packages": {
-    "core": {
-      "release-type": "simple",
-      "package-name": "io.github.supabase-community/core",
-      "component": "core",
-      "changelog-path": "CHANGELOG.md",
-      "extra-files": [
-        {
-          "type": "generic",
-          "path": "src/supabase/core/client.clj"
-        },
-        {
-          "type": "generic",
-          "path": "README.md"
-        }
-      ]
-    },
-    "auth": {
-      "release-type": "simple",
-      "package-name": "io.github.supabase-community/auth",
-      "component": "auth",
-      "changelog-path": "CHANGELOG.md",
-      "extra-files": [
-        {
-          "type": "generic",
-          "path": "README.md"
-        }
-      ]
-    },
-    "storage": {
-      "release-type": "simple",
-      "package-name": "io.github.supabase-community/storage",
-      "component": "storage",
-      "changelog-path": "CHANGELOG.md",
-      "extra-files": [
-        {
-          "type": "generic",
-          "path": "README.md"
-        }
-      ]
-    },
-    "realtime": {
-      "release-type": "simple",
-      "package-name": "io.github.supabase-community/realtime",
-      "component": "realtime",
-      "changelog-path": "CHANGELOG.md",
-      "extra-files": [
-        {
-          "type": "generic",
-          "path": "README.md"
-        }
-      ]
+    "postgrest" : {
+      "release-type" : "simple",
+      "package-name" : "io.github.supabase-community/postgrest",
+      "component" : "postgrest",
+      "changelog-path" : "CHANGELOG.md",
+      "extra-files" : [ {
+        "type" : "generic",
+        "path" : "README.md"
+      } ]
     }
   }
 }
