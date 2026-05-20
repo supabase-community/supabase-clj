@@ -22,10 +22,9 @@ Individual product client documentation:
 - [Core](core/)
 - [Auth](auth/)
 - [Storage](storage/)
+- [Realtime](realtime/)
 - PostgREST (coming soon)
-- Storage (coming soon)
 - Functions (coming soon)
-- Realtime (coming soon)
 
 ### Clients
 

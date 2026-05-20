@@ -87,6 +87,18 @@
           "path": "README.md"
         }
       ]
+    },
+    "realtime": {
+      "release-type": "simple",
+      "package-name": "io.github.supabase-community/realtime",
+      "component": "realtime",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "README.md"
+        }
+      ]
     }
   }
 }
