@@ -1,3 +1,6 @@
 {:tasks
  {new-module {:doc "Scaffold a new module under this monorepo. Usage: bb new-module <name>"
-              :task (load-file "bin/new_module.clj")}}}
+              :task (load-file "bin/new_module.clj")}
+  release    {:doc "Tag + publish a module release. Usage: bb release <module> <version> [--notes \"...\"]"
+              :task (load-file "bin/release.clj")}}}
+
