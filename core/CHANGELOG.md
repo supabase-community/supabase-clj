@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.3.0...core-v0.4.0) (2026-05-20)
+
+
+### Features
+
+* **core:** add merge-query-param helper for stacked query values ([af0f884](https://github.com/supabase-community/supabase-clj/commit/af0f884b6c37c209aefb7f8447d8c2abcdf11bc5))
+
 ## [0.3.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.2.0...core-v0.3.0) (2026-05-05)
 
 ### Features
