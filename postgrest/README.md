@@ -12,7 +12,7 @@ aggregations, RPC, EXPLAIN.
 ```clojure
 ;; deps.edn
 {:deps
- {io.github.supabase-community/core {:mvn/version "0.3.0"}
+ {io.github.supabase-community/core {:mvn/version "0.4.0"}
   io.github.supabase-community/postgrest {:mvn/version "0.0.0"}}}
 ```
 
