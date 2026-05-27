@@ -3,5 +3,5 @@
   "auth": "0.1.0",
   "storage": "0.1.0",
   "realtime": "0.0.0",
-  "postgrest": "0.0.0"
+  "postgrest": "1.0.0"
 }
