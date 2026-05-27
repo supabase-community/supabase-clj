@@ -32,7 +32,7 @@
 (deftest build-http-client-test
   (testing "honors version and redirect-policy"
     (let [client (transport/build-http-client
-                   {:connect-timeout 500 :version :http-2 :redirect-policy :never})]
+                  {:connect-timeout 500 :version :http-2 :redirect-policy :never})]
       (is (instance? HttpClient client))
       (is (= HttpClient$Version/HTTP_2 (.version client)))
       (is (= HttpClient$Redirect/NEVER (.followRedirects client))))))
