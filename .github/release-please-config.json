@@ -89,6 +89,16 @@
         "type" : "generic",
         "path" : "README.md"
       } ]
+    },
+    "functions" : {
+      "release-type" : "simple",
+      "package-name" : "io.github.supabase-community/functions",
+      "component" : "functions",
+      "changelog-path" : "CHANGELOG.md",
+      "extra-files" : [ {
+        "type" : "generic",
+        "path" : "README.md"
+      } ]
     }
   }
 }
