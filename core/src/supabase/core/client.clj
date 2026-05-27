@@ -40,10 +40,11 @@
   (:require [clojure.string :as str]
             [malli.core :as m]
             [malli.transform :as mt]
-            [supabase.core.error :as error]))
+            [supabase.core.error :as error]
+            [supabase.core.transport :as transport]))
 
 ;; x-release-please-start-version
-(def ^:private version "0.4.0")
+(def ^:private version "0.5.0")
 ;; x-release-please-end
 
 ;; ---------------------------------------------------------------------------
@@ -77,6 +78,17 @@
   "Schema for storage configuration options."
   (m/schema [:map [:use-new-hostname {:default false} :boolean]]))
 
+(def Pool
+  "Schema for HTTP transport pool options. See
+  `supabase.core.transport/build-http-client` for the full key set."
+  (m/schema [:map
+             [:connect-timeout {:optional true} :int]
+             [:version {:optional true} [:enum :http-1.1 :http-2]]
+             [:redirect-policy {:optional true} [:enum :always :never :normal]]
+             [:cookie-handler {:optional true} [:fn any?]]
+             [:executor {:optional true} [:fn any?]]
+             [:ssl-context {:optional true} [:fn any?]]]))
+
 (def Client
   "Schema for the full Supabase client map."
   (m/schema [:map
@@ -92,7 +104,10 @@
              [:functions-url :string]
              [:storage-url :string]
              [:database-url :string]
-             [:realtime-url :string]]))
+             [:realtime-url :string]
+             [:pool {:optional true} #'Pool]
+             [:transport {:optional true} [:fn any?]]
+             [:log? {:optional true} :boolean]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Storage hostname transformation
@@ -174,6 +189,13 @@
     - `:global`        — global options, e.g. `{:headers {\"x-custom\" \"val\"}}`
     - `:auth`          — auth options, e.g. `{:flow-type \"pkce\"}`
     - `:storage`       — storage options, e.g. `{:use-new-hostname true}`
+    - `:pool`          — transport pool options (connect-timeout, version,
+                         redirect-policy, ...). Builds a dedicated HTTP
+                         client used for every request from this client.
+    - `:transport`     — pre-built `supabase.core.transport/Transport`.
+                         Overrides `:pool` if both are given.
+    - `:log?`          — when true, request/response logging is enabled
+                         for every request issued via this client.
 
   ## Examples
 
@@ -191,20 +213,29 @@
                         (default-storage-key base-url))
         user-headers (get-in opts [:global :headers] {})
         merged-headers (merge (default-headers) user-headers)
-        client-map (merge {:db (or (:db opts) {})
-                           :storage (or (:storage opts) {})}
-                          opts
-                          {:api-key api-key
-                           :base-url base-url
-                           :access-token access-token
-                           :auth-url (str base-url "/auth/v1")
-                           :realtime-url (str base-url "/realtime/v1")
-                           :functions-url (str base-url "/functions/v1")
-                           :database-url (str base-url "/rest/v1")
-                           :storage-url storage-url}
-                          {:global {:headers merged-headers}}
-                          {:auth (assoc (or (:auth opts) {})
-                                        :storage-key storage-key)})
+        pool-opts (:pool opts)
+        ;; Explicit :transport > :pool-derived transport > nothing (resolves
+        ;; to default-transport at request time).
+        explicit-transport (:transport opts)
+        derived-transport (when (and (nil? explicit-transport) pool-opts)
+                            (transport/hato-transport pool-opts))
+        chosen-transport (or explicit-transport derived-transport)
+        client-map (cond-> (merge {:db (or (:db opts) {})
+                                   :storage (or (:storage opts) {})}
+                                  opts
+                                  {:api-key api-key
+                                   :base-url base-url
+                                   :access-token access-token
+                                   :auth-url (str base-url "/auth/v1")
+                                   :realtime-url (str base-url "/realtime/v1")
+                                   :functions-url (str base-url "/functions/v1")
+                                   :database-url (str base-url "/rest/v1")
+                                   :storage-url storage-url}
+                                  {:global {:headers merged-headers}}
+                                  {:auth (assoc (or (:auth opts) {})
+                                                :storage-key storage-key)})
+                     chosen-transport (assoc :transport chosen-transport)
+                     (nil? chosen-transport) (dissoc :transport))
         decoded (m/decode Client client-map mt/default-value-transformer)]
     (if (m/validate Client decoded)
       decoded

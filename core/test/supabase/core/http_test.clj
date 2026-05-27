@@ -1,8 +1,13 @@
 (ns supabase.core.http-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [jsonista.core :as json]
             [supabase.core.client :as client]
-            [supabase.core.http :as http]))
+            [supabase.core.error :as error]
+            [supabase.core.http :as http]
+            [supabase.core.transport :as transport])
+  (:import (java.io ByteArrayInputStream)
+           (java.util.concurrent CompletableFuture)))
 
 (def base-url "https://abc123.supabase.co")
 (def api-key "test-api-key-123")
@@ -208,6 +213,150 @@
 ;; ---------------------------------------------------------------------------
 ;; Full request pipeline (no execution)
 ;; ---------------------------------------------------------------------------
+
+;; ---------------------------------------------------------------------------
+;; with-multipart
+;; ---------------------------------------------------------------------------
+
+(deftest with-multipart-test
+  (testing "attaches multipart parts and clears body"
+    (let [parts [{:name "file" :content (byte-array [1 2 3])
+                  :content-type "image/png" :filename "a.png"}]
+          req (-> (http/request test-client)
+                  (http/with-body {:ignored true})
+                  (http/with-multipart parts))]
+      (is (= parts (:multipart req)))
+      (is (nil? (:body req))))))
+
+;; ---------------------------------------------------------------------------
+;; with-response-as / with-decoder / with-error-parser
+;; ---------------------------------------------------------------------------
+
+(deftest response-knobs-test
+  (testing "with-response-as stores keyword"
+    (is (= :stream (:response-as (-> (http/request test-client)
+                                     (http/with-response-as :stream))))))
+  (testing "with-decoder stores fn"
+    (is (fn? (:decoder (-> (http/request test-client)
+                           (http/with-decoder identity))))))
+  (testing "with-error-parser stores fn"
+    (is (fn? (:error-parser (-> (http/request test-client)
+                                (http/with-error-parser (fn [_ _ _ _])))))))
+  (testing "with-timeout stores ms"
+    (is (= 5000 (:timeout (-> (http/request test-client)
+                              (http/with-timeout 5000))))))
+  (testing "with-logging flag"
+    (is (true? (:log? (-> (http/request test-client) http/with-logging))))
+    (is (false? (:log? (-> (http/request test-client) (http/with-logging false)))))))
+
+;; ---------------------------------------------------------------------------
+;; execute via stub Transport
+;; ---------------------------------------------------------------------------
+
+(defn stub-transport
+  "Creates a transport that captures the last request and returns
+  the supplied response (or applies the supplied responder fn)."
+  ([resp]
+   (let [captured (atom nil)]
+     [captured
+      (reify transport/Transport
+        (execute [_ req] (reset! captured req) (if (fn? resp) (resp req) resp))
+        (execute-async [_ req]
+          (reset! captured req)
+          (CompletableFuture/completedFuture (if (fn? resp) (resp req) resp))))])))
+
+(deftest execute-success-test
+  (testing "decodes JSON string response by default"
+    (let [[_ t] (stub-transport {:status 200 :body "{\"ok\":true}" :headers {}})
+          res (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/health")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (= 200 (:status res)))
+      (is (= {:ok true} (:body res)))))
+
+  (testing "passes through stream body without decoding"
+    (let [stream (ByteArrayInputStream. (.getBytes "raw"))
+          [_ t] (stub-transport {:status 200 :body stream :headers {}})
+          res (-> (http/request test-client)
+                  (http/with-service-url :storage-url "/object/x")
+                  (http/with-response-as :stream)
+                  (http/with-transport t)
+                  http/execute)]
+      (is (identical? stream (:body res)))))
+
+  (testing "custom decoder is honoured"
+    (let [[_ t] (stub-transport {:status 200 :body "raw" :headers {}})
+          res (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-decoder str/upper-case)
+                  (http/with-transport t)
+                  http/execute)]
+      (is (= "RAW" (:body res))))))
+
+(deftest execute-error-test
+  (testing "maps 404 to anomaly via default error parser"
+    (let [[_ t] (stub-transport {:status 404 :body "{\"message\":\"nope\"}" :headers {}})
+          res (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/user")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (error/anomaly? res))
+      (is (= :cognitect.anomalies/not-found (:cognitect.anomalies/category res)))
+      (is (= 404 (:http/status res)))
+      (is (= :auth (:supabase/service res)))))
+
+  (testing "custom error-parser wins"
+    (let [[_ t] (stub-transport {:status 500 :body "boom" :headers {}})
+          parser (fn [status _ _ service]
+                   {:cognitect.anomalies/category :cognitect.anomalies/fault
+                    :supabase/code :custom
+                    :http/status status
+                    :supabase/service service})
+          res (-> (http/request test-client)
+                  (http/with-service-url :functions-url "/x")
+                  (http/with-error-parser parser)
+                  (http/with-transport t)
+                  http/execute)]
+      (is (= :custom (:supabase/code res)))
+      (is (= :functions (:supabase/service res))))))
+
+(deftest execute-bang-test
+  (testing "throws ex-info on anomaly with anomaly as ex-data"
+    (let [[_ t] (stub-transport {:status 500 :body "{\"err\":\"x\"}" :headers {}})
+          req (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t))]
+      (try
+        (http/execute! req)
+        (is false "should have thrown")
+        (catch Exception e
+          (is (error/anomaly? (ex-data e))))))))
+
+(deftest execute-async-test
+  (testing "returns CompletableFuture resolving to decoded body"
+    (let [[_ t] (stub-transport {:status 200 :body "{\"async\":true}" :headers {}})
+          fut (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute-async)]
+      (is (instance? CompletableFuture fut))
+      (is (= {:async true} (:body @fut))))))
+
+(deftest execute-exception-test
+  (testing "exceptions raised by transport become fault anomalies"
+    (let [t (reify transport/Transport
+              (execute [_ _] (throw (RuntimeException. "boom")))
+              (execute-async [_ _]
+                (doto (CompletableFuture.)
+                  (.completeExceptionally (RuntimeException. "boom")))))
+          res (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (error/anomaly? res))
+      (is (= :cognitect.anomalies/fault (:cognitect.anomalies/category res)))
+      (is (= :exception (:supabase/code res))))))
 
 (deftest full-pipeline-test
   (testing "builds a complete request via threading"
