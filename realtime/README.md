@@ -11,8 +11,8 @@ single multiplexed connection.
 ```clojure
 ;; deps.edn
 {:deps
- {io.github.supabase-community/core {:mvn/version "0.3.0"}
-  io.github.supabase-community/realtime {:mvn/version "0.0.0"}}}
+ {io.github.supabase-community/core {:mvn/version "1.0.0"}
+  io.github.supabase-community/realtime {:mvn/version "1.0.0"}}}
 ```
 
 <!-- x-release-please-end -->
