@@ -24,7 +24,7 @@ Individual product client documentation:
 - [Storage](storage/)
 - [Realtime](realtime/)
 - [Postgrest](postgrest/)
-- Functions (coming soon)
+- [Functions](functions/)
 
 ### Clients
 

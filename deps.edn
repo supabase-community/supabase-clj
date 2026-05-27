@@ -5,7 +5,7 @@
    :extra-paths ["core/src" "core/test"]},
   :auth
   {:extra-deps
-   {io.github.supabase-community/auth {:local/root "core"}},
+   {io.github.supabase-community/auth {:local/root "auth"}},
    :extra-paths ["auth/src" "auth/test"]},
   :fmt
   {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.0"}},
@@ -17,11 +17,13 @@
     io.github.supabase-community/auth {:local/root "auth"},
     io.github.supabase-community/storage {:local/root "storage"},
     io.github.supabase-community/realtime {:local/root "realtime"},
-    io.github.supabase-community/postgrest {:local/root "postgrest"}},
+    io.github.supabase-community/postgrest {:local/root "postgrest"},
+    io.github.supabase-community/functions {:local/root "functions"}},
    :extra-paths
    ["core/test"
     "auth/test"
     "storage/test"
     "realtime/test"
-    "postgrest/test"],
+    "postgrest/test"
+    "functions/test"],
    :main-opts ["-m" "kaocha.runner"]}}}
