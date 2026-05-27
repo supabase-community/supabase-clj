@@ -9,8 +9,8 @@ TODO: one-line description.
 ```clojure
 ;; deps.edn
 {:deps
- {io.github.supabase-community/core {:mvn/version "0.5.0"}
-  io.github.supabase-community/functions {:mvn/version "0.0.0"}}}
+ {io.github.supabase-community/core {:mvn/version "0.1.0"}
+  io.github.supabase-community/functions {:mvn/version "0.1.0"}}}
 ```
 
 <!-- x-release-please-end -->
