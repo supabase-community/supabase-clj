@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.4.0...core-v0.5.0) (2026-05-27)
+
+
+### Features
+
+* **core:** pluggable transport, multipart, streaming, pool, logging ([2c2cbe3](https://github.com/supabase-community/supabase-clj/commit/2c2cbe3cc45a77040c8c0e800db534118fed2852))
+
 ## [0.4.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.3.0...core-v0.4.0) (2026-05-20)
 
 
