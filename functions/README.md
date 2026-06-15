@@ -4,16 +4,12 @@ TODO: one-line description.
 
 ## Installation
 
-<!-- x-release-please-start-version -->
-
 ```clojure
 ;; deps.edn
 {:deps
- {io.github.supabase-community/core {:mvn/version "0.1.0"}
-  io.github.supabase-community/functions {:mvn/version "0.1.0"}}}
+ {io.github.supabase-community/core {:mvn/version "0.5.0"}
+  io.github.supabase-community/functions {:mvn/version "0.1.0"}}} ;; x-release-please-version
 ```
-
-<!-- x-release-please-end -->
 
 ## Quick Start
 
