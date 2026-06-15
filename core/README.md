@@ -6,7 +6,7 @@ Core module for the Supabase Clojure SDK. Provides client configuration, HTTP re
 
 ```clojure
 ;; deps.edn
-{:deps {io.github.supabase-community/core {:mvn/version "0.5.0"}}} ;; x-release-please-version
+{:deps {io.github.supabase-community/core {:mvn/version "0.1.0"}}} ;; x-release-please-version
 ```
 
 ## Quick Start

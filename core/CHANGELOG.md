@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.5.0...core-v0.1.0) (2026-06-15)
+
+
+### Features
+
+* auth first release ([#3](https://github.com/supabase-community/supabase-clj/issues/3)) ([157f1dc](https://github.com/supabase-community/supabase-clj/commit/157f1dcb23db3c0c34082ba867528051b8e5dc71))
+* client main namespace and tests ([c2ff7dd](https://github.com/supabase-community/supabase-clj/commit/c2ff7dd25d4590da3737753fc703b6dae5c46b98))
+* composable http namespace ([b6133d7](https://github.com/supabase-community/supabase-clj/commit/b6133d796cceb0677a93af14e5c01f1e4b41be88))
+* core module setup and error anomalies namespace ([ff5acec](https://github.com/supabase-community/supabase-clj/commit/ff5acecb414775f50d790ed040ba613128c810f1))
+* **core:** add merge-query-param helper for stacked query values ([af0f884](https://github.com/supabase-community/supabase-clj/commit/af0f884b6c37c209aefb7f8447d8c2abcdf11bc5))
+* **core:** pluggable transport, multipart, streaming, pool, logging ([2c2cbe3](https://github.com/supabase-community/supabase-clj/commit/2c2cbe3cc45a77040c8c0e800db534118fed2852))
+* **core:** support binary response body on http ([2389a29](https://github.com/supabase-community/supabase-clj/commit/2389a293e074bf6a943be5f443e665024fd0df08))
+
+
+### Continuous Integration
+
+* formatting and fixing minor issues ([b97dc17](https://github.com/supabase-community/supabase-clj/commit/b97dc175dfeac0985aebcc0e77092824bc5da9ed))
+
 ## [0.5.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.4.0...core-v0.5.0) (2026-05-27)
 
 
