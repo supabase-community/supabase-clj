@@ -13,10 +13,6 @@
 
 (def ^:private captured (atom nil))
 
-(defn- capture-execute [req]
-  (reset! captured req)
-  {:status 200 :body {:ok true} :headers {}})
-
 (defn- run-with-capture
   ([f] (run-with-capture f {:status 200 :body {:ok true} :headers {}}))
   ([f response]
@@ -329,3 +325,212 @@
     (is (= (str storage-url "/object/authenticated/avatars/folder/a.png")
            (:url req)))
     (is (= :byte-array (:response-as req)))))
+
+;; ---------------------------------------------------------------------------
+;; Upload metadata
+;; ---------------------------------------------------------------------------
+
+(defn- decode-metadata-header [req]
+  (let [b64 (get-in req [:headers "x-metadata"])
+        decoded (String. (.decode (java.util.Base64/getDecoder) b64) "UTF-8")]
+    (json/read-value decoded)))
+
+(deftest upload-metadata-test
+  (let [[_ req] (run-with-capture
+                 #(storage/upload (valid-storage) "a.txt" "hi"
+                                  {:metadata {"owner" "zoe" "kind" "note"}}))]
+    (is (= {"owner" "zoe" "kind" "note"} (decode-metadata-header req)))))
+
+(deftest upload-no-metadata-header-test
+  (let [[_ req] (run-with-capture
+                 #(storage/upload (valid-storage) "a.txt" "hi"))]
+    (is (not (contains? (:headers req) "x-metadata")))))
+
+;; ---------------------------------------------------------------------------
+;; update (replace)
+;; ---------------------------------------------------------------------------
+
+(deftest update-request-test
+  (let [bytes (.getBytes "new")
+        [_ req] (run-with-capture
+                 #(storage/update (valid-storage) "/folder/a.txt" bytes
+                                  {:content-type "text/plain" :upsert true}))]
+    (is (= :put (:method req)))
+    (is (= (str storage-url "/object/avatars/folder/a.txt") (:url req)))
+    (is (= "text/plain" (get-in req [:headers "content-type"])))
+    (is (= "true" (get-in req [:headers "x-upsert"])))
+    (is (identical? bytes (:body req)))))
+
+(deftest update-invalid-body-test
+  (is (error/anomaly? (storage/update (valid-storage) "p" 123))))
+
+;; ---------------------------------------------------------------------------
+;; Signed upload URLs
+;; ---------------------------------------------------------------------------
+
+(deftest create-signed-upload-url-request-test
+  (let [resp {:status 200
+              :body {:url "/object/upload/sign/avatars/a.png?token=abc123"}
+              :headers {}}
+        [result req] (run-with-capture
+                      #(storage/create-signed-upload-url (valid-storage) "a.png"
+                                                         {:upsert true})
+                      resp)]
+    (is (= :post (:method req)))
+    (is (= (str storage-url "/object/upload/sign/avatars/a.png") (:url req)))
+    (is (= "true" (get-in req [:headers "x-upsert"])))
+    (is (= "abc123" (get-in result [:body :token])))
+    (is (= "a.png" (get-in result [:body :path])))
+    (is (= (str storage-url "/object/upload/sign/avatars/a.png?token=abc123")
+           (get-in result [:body :signed-url])))))
+
+(deftest create-signed-upload-url-error-passthrough-test
+  (let [resp (error/from-http-response 409 {:message "exists"} :storage)
+        [result _] (run-with-capture
+                    #(storage/create-signed-upload-url (valid-storage) "a.png")
+                    resp)]
+    (is (error/anomaly? result))))
+
+(deftest upload-to-signed-url-request-test
+  (let [bytes (.getBytes "data")
+        [_ req] (run-with-capture
+                 #(storage/upload-to-signed-url (valid-storage) "/folder/a.png"
+                                                "tok-xyz" bytes
+                                                {:content-type "image/png"}))]
+    (is (= :put (:method req)))
+    (is (= (str storage-url "/object/upload/sign/avatars/folder/a.png") (:url req)))
+    (is (= "tok-xyz" (get-in req [:query "token"])))
+    (is (= "image/png" (get-in req [:headers "content-type"])))
+    (is (identical? bytes (:body req)))))
+
+(deftest upload-to-signed-url-invalid-body-test
+  (is (error/anomaly?
+       (storage/upload-to-signed-url (valid-storage) "p" "tok" 123))))
+
+;; ---------------------------------------------------------------------------
+;; Image transforms
+;; ---------------------------------------------------------------------------
+
+(deftest transform->query-test
+  (let [q (#'supabase.storage/transform->query
+           {:width 100 :height 50 :resize :contain :quality 90 :format "webp"})]
+    (is (.contains q "width=100"))
+    (is (.contains q "height=50"))
+    (is (.contains q "resize=contain"))
+    (is (.contains q "quality=90"))
+    (is (.contains q "format=webp")))
+  (testing "defaults applied, width/height omitted when absent"
+    (let [q (#'supabase.storage/transform->query {:width 200})]
+      (is (.contains q "width=200"))
+      (is (.contains q "resize=cover"))
+      (is (.contains q "quality=80"))
+      (is (.contains q "format=origin"))
+      (is (not (.contains q "height=")))))
+  (testing "nil/empty transform → nil"
+    (is (nil? (#'supabase.storage/transform->query nil)))
+    (is (nil? (#'supabase.storage/transform->query {})))))
+
+(deftest public-url-with-transform-test
+  (let [s (valid-storage)
+        url (storage/get-public-url s "a.png"
+                                    {:transform {:width 100 :height 100}})]
+    (is (.contains url "/render/image/public/avatars/a.png"))
+    (is (.contains url "width=100"))
+    (is (.contains url "height=100"))))
+
+(deftest public-url-no-transform-uses-object-test
+  (let [s (valid-storage)
+        url (storage/get-public-url s "a.png")]
+    (is (.contains url "/object/public/avatars/a.png"))
+    (is (not (.contains url "render/image")))))
+
+(deftest signed-url-with-transform-test
+  (let [resp {:status 200
+              :body {:signedURL "/object/sign/avatars/a.png?token=abc"}
+              :headers {}}
+        [_ req] (run-with-capture
+                 #(storage/create-signed-url (valid-storage) "a.png"
+                                             {:expires-in 60
+                                              :transform {:width 64 :resize :fill}})
+                 resp)
+        body (parse-body req)]
+    (is (= 60 (get body "expiresIn")))
+    (is (= 64 (get-in body ["transform" "width"])))
+    (is (= "fill" (get-in body ["transform" "resize"])))
+    (is (= 80 (get-in body ["transform" "quality"])))))
+
+(deftest download-with-transform-test
+  (let [[_ req] (run-with-capture
+                 #(storage/download (valid-storage) "a.png"
+                                    {:transform {:width 50}}))]
+    (is (.contains (:url req) "/render/image/authenticated/avatars/a.png"))
+    (is (.contains (:url req) "width=50"))))
+
+;; ---------------------------------------------------------------------------
+;; Download — streaming / range / headers
+;; ---------------------------------------------------------------------------
+
+(deftest download-stream-test
+  (let [[_ req] (run-with-capture
+                 #(storage/download (valid-storage) "a.png" {:response-as :stream}))]
+    (is (= :stream (:response-as req)))))
+
+(deftest download-range-test
+  (let [[_ req] (run-with-capture
+                 #(storage/download (valid-storage) "a.png" {:range [0 1023]}))]
+    (is (= "bytes=0-1023" (get-in req [:headers "range"])))))
+
+(deftest download-custom-headers-test
+  (let [[_ req] (run-with-capture
+                 #(storage/download (valid-storage) "a.png"
+                                    {:headers {"x-foo" "bar"}}))]
+    (is (= "bar" (get-in req [:headers "x-foo"])))))
+
+(deftest download-invalid-opts-test
+  (is (error/anomaly? (storage/download (valid-storage) "a.png" {:bogus 1}))))
+
+;; ---------------------------------------------------------------------------
+;; list-files-v2 (cursor pagination)
+;; ---------------------------------------------------------------------------
+
+(deftest list-files-v2-request-test
+  (let [[_ req] (run-with-capture
+                 #(storage/list-files-v2 (valid-storage) "folder"
+                                         {:limit 50 :cursor "c1" :with-delimiter true}))
+        body (parse-body req)]
+    (is (= :post (:method req)))
+    (is (= (str storage-url "/object/list-v2/avatars") (:url req)))
+    (is (= "folder" (get body "prefix")))
+    (is (= 50 (get body "limit")))
+    (is (= "c1" (get body "cursor")))
+    (is (= true (get body "with_delimiter")))))
+
+(deftest list-files-v2-default-prefix-test
+  (let [[_ req] (run-with-capture #(storage/list-files-v2 (valid-storage)))
+        body (parse-body req)]
+    (is (= "" (get body "prefix")))))
+
+(deftest list-files-v2-invalid-opts-test
+  (is (error/anomaly? (storage/list-files-v2 (valid-storage) nil {:bogus 1}))))
+
+;; ---------------------------------------------------------------------------
+;; Error parser
+;; ---------------------------------------------------------------------------
+
+(deftest storage-error-parser-test
+  (testing "prefers API message field"
+    (let [a (#'supabase.storage/storage-error-parser
+             404 {:message "Object not found" :statusCode "404"} nil :storage)]
+      (is (error/anomaly? a))
+      (is (= "Object not found" (:cognitect.anomalies/message a)))
+      (is (= :storage (:supabase/service a)))))
+  (testing "falls back to status-derived message"
+    (let [a (#'supabase.storage/storage-error-parser 500 nil nil :storage)]
+      (is (error/anomaly? a)))))
+
+(deftest requests-carry-error-parser-test
+  (testing "file + bucket ops install the storage error parser"
+    (let [[_ req] (run-with-capture #(storage/list-buckets test-client))]
+      (is (fn? (:error-parser req))))
+    (let [[_ req] (run-with-capture #(storage/download (valid-storage) "a.png"))]
+      (is (fn? (:error-parser req))))))

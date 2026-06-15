@@ -1,7 +1,8 @@
 {:paths ["src"]
 
  :deps
- {io.github.supabase-community/core {:local/root "../core"}}
+ {io.github.supabase-community/core {:local/root "../core"}
+  metosin/jsonista {:mvn/version "1.0.0"}}
 
  :aliases
  {:test {:extra-paths ["test"]
