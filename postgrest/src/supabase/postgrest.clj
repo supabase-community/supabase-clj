@@ -42,8 +42,9 @@
 
   See sub-namespaces for the full API:
     - `supabase.postgrest.filters`  — eq / gt / like / contains / and / or / not / ...
-    - `supabase.postgrest.query`    — select / insert / upsert / update / delete / rpc / aggregations
-    - `supabase.postgrest.transform`— order / limit / range / single / csv / explain / returning / ..."
+    - `supabase.postgrest.query`    — select / embed / insert / upsert / update / delete / rpc / aggregations
+    - `supabase.postgrest.transform`— order / limit / range / single / csv / explain / returning / ...
+    - `supabase.postgrest.encode`   — pg-array / pg-range / pg-bool / ->iso (type coercion helpers)"
   (:refer-clojure :exclude [count filter min max range update])
   (:require [supabase.core.client :as client]
             [supabase.core.error :as error]
@@ -132,6 +133,7 @@
 (def match         filters/match)
 
 ;; Query verbs
+(def embed   query/embed)
 (def select  query/select)
 (def insert  query/insert)
 (def upsert  query/upsert)

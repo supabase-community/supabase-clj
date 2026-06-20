@@ -100,6 +100,39 @@ aggregations, RPC, EXPLAIN.
 (pg/returning req [:id :name])            ;; for INSERT/UPDATE/etc.
 ```
 
+## Resource embedding (joins)
+
+Embed related tables inside a `select` with `pg/embed`. Add `:inner` to drop
+parent rows with no match, or `:hint` to disambiguate an ambiguous foreign key.
+
+```clojure
+(-> (pg/from c "threads")
+    (pg/select ["id" "subject"
+                (pg/embed "messages" [:id :body] {:inner true})
+                (pg/embed "users" [:name] {:as "author" :hint "author_id"})]
+               {:returning true})
+    (pg/execute))
+;; select=id,subject,messages!inner(id,body),author:users!author_id(name)
+```
+
+## Encoding complex column types
+
+`supabase.postgrest.encode` renders PostgreSQL literals for arrays, ranges,
+timestamps, and booleans so you can pass them as filter values:
+
+```clojure
+(require '[supabase.postgrest.encode :as enc])
+
+(enc/pg-array ["vip" "weekend"])   ;; => "{vip,weekend}"
+(enc/pg-range 1 10)                 ;; => "[1,10)"
+(enc/pg-range start end "[]")       ;; instants coerced to ISO-8601
+(enc/pg-bool true)                  ;; => "true"
+
+(-> (pg/from c "reservations")
+    (pg/eq "during" (enc/pg-range start end))
+    (pg/execute))
+```
+
 ## Aggregations
 
 ```clojure
@@ -134,19 +167,18 @@ Anomaly maps follow `cognitect/anomalies` plus PostgREST decoration:
 (supabase.core.error/anomaly? result)
 ;; => true for any non-2xx
 
-(:database/hint result)   ;; PostgREST error hint, when present
-(:database/code result)   ;; PostgREST error code
-(:database/detail result) ;; PostgREST error details
+(:postgrest/message result) ;; PostgREST error message
+(:postgrest/hint result)    ;; PostgREST error hint, when present
+(:postgrest/code result)    ;; PostgREST / SQLSTATE error code
+(:postgrest/details result) ;; PostgREST error details
 ```
 
-## v0.1.0 scope
+Well-known codes refine `:cognitect.anomalies/category`: `PGRST116` →
+`:not-found`, `PGRST301` / `42501` → `:forbidden`.
 
-**In:** every PostgREST operator, full query/transform/aggregation surface,
-RPC head/get/post variants, schema profile headers, custom media types,
-error enrichment.
-
-**Deferred to v0.2+:** Ecto-style schema decoder (`execute_to`), Ecto RLS
-helpers (PostgreSQL session vars — out of scope for an HTTP client).
+**Deferred:** Ecto-style schema decoder (`execute_to`), request cancellation
+seam, and a live-PostgREST integration suite (PostgreSQL session-var RLS
+helpers are out of scope for an HTTP client).
 
 ## License
 

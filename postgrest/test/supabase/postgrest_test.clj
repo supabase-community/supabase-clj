@@ -4,7 +4,8 @@
             [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.core.http :as http]
-            [supabase.postgrest :as pg]))
+            [supabase.postgrest :as pg]
+            [supabase.postgrest.encode :as enc]))
 
 (def base-url "https://abc123.supabase.co")
 (def test-client (client/make-client base-url "anon-key"))
@@ -401,6 +402,65 @@
     (is (error/anomaly? result))
     (is (= :database-error (:supabase/code result)))
     (is (= "boom" (:cognitect.anomalies/message result)))
-    (is (= "try X" (:database/hint result)))
-    (is (= "PGRST123" (:database/code result)))
-    (is (= "row 5" (:database/detail result)))))
+    (is (= "boom" (:postgrest/message result)))
+    (is (= "try X" (:postgrest/hint result)))
+    (is (= "PGRST123" (:postgrest/code result)))
+    (is (= "row 5" (:postgrest/details result)))))
+
+(deftest error-known-code-refines-category
+  (testing "PGRST116 -> not-found"
+    (let [[result _] (run-with-capture
+                      #(-> (pg/from test-client "t") (pg/single) (pg/execute))
+                      (error/from-http-response 406
+                                                {:message "no rows" :code "PGRST116"}
+                                                :postgrest))]
+      (is (= :cognitect.anomalies/not-found (:cognitect.anomalies/category result)))
+      (is (= "PGRST116" (:postgrest/code result)))))
+  (testing "42501 -> forbidden"
+    (let [[result _] (run-with-capture
+                      #(-> (pg/from test-client "t") (pg/select "*") (pg/execute))
+                      (error/from-http-response 400
+                                                {:message "denied" :code "42501"}
+                                                :postgrest))]
+      (is (= :cognitect.anomalies/forbidden (:cognitect.anomalies/category result))))))
+
+;; ---------------------------------------------------------------------------
+;; embed (resource embedding / join hints)
+;; ---------------------------------------------------------------------------
+
+(deftest embed-builds-select-strings
+  (is (= "messages(id,content)" (pg/embed "messages" [:id :content])))
+  (is (= "messages!inner(id,content)" (pg/embed "messages" [:id :content] {:inner true})))
+  (is (= "messages!left(*)" (pg/embed "messages" "*" {:left true})))
+  (is (= "author:users!author_id(name)"
+         (pg/embed "users" [:name] {:as "author" :hint "author_id"}))))
+
+(deftest embed-inside-select
+  (let [[_ req] (run-with-capture
+                 #(-> (pg/from test-client "threads")
+                      (pg/select ["id" (pg/embed "messages" [:body] {:inner true})]
+                                 {:returning true})
+                      (pg/execute)))]
+    (is (= "id,messages!inner(body)" (get-in req [:query "select"])))))
+
+;; ---------------------------------------------------------------------------
+;; encode (type coercion helpers)
+;; ---------------------------------------------------------------------------
+
+(deftest encode-helpers
+  (is (= "{a,b,c}" (enc/pg-array ["a" "b" "c"])))
+  (is (= "{1,2,NULL}" (enc/pg-array [1 2 nil])))
+  (is (= "{\"a,b\",c}" (enc/pg-array ["a,b" "c"]))
+      "elements with commas are quoted")
+  (is (= "[1,10)" (enc/pg-range 1 10)))
+  (is (= "[1,10]" (enc/pg-range 1 10 "[]")))
+  (is (= "(,5)" (enc/pg-range nil 5 "()")) "unbounded low")
+  (is (= "true" (enc/pg-bool true)))
+  (is (= "false" (enc/pg-bool false)))
+  (is (= "2026-06-20T00:00:00Z"
+         (enc/->iso (java.time.Instant/parse "2026-06-20T00:00:00Z")))))
+
+(deftest encode-range-with-instants
+  (let [lo (java.time.Instant/parse "2026-01-01T00:00:00Z")
+        hi (java.time.Instant/parse "2026-02-01T00:00:00Z")]
+    (is (= "[2026-01-01T00:00:00Z,2026-02-01T00:00:00Z)" (enc/pg-range lo hi)))))

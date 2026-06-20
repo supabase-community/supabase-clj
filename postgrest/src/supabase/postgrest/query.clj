@@ -2,7 +2,6 @@
   "Query verbs (select/insert/upsert/update/delete) + rpc + aggregations."
   (:refer-clojure :exclude [count max min update])
   (:require [clojure.string :as str]
-            [supabase.core.error :as error]
             [supabase.core.http :as http]
             [supabase.postgrest.specs :as specs]))
 
@@ -15,6 +14,37 @@
     (= "*" columns) "*"
     (sequential? columns) (str/join "," (map name columns))
     :else (str columns)))
+
+(defn embed
+  "Builds an embedded-resource string for use inside a `select` vector
+  (resource embedding / joins across foreign keys).
+
+  `relation` is the related table or FK relationship name. `cols` is `\"*\"`
+  or a vector of column names (each may itself be an `embed` string for
+  nested embeds).
+
+  Opts:
+    :as    — alias the embed (`alias:relation(...)`)
+    :hint  — disambiguate the FK relationship for ambiguous embeds
+             (`relation!hint(...)`)
+    :inner — boolean; INNER join — drop parent rows with no match
+             (`relation!inner(...)`)
+    :left  — boolean; explicit LEFT join (`relation!left(...)`)
+
+      (embed \"messages\" [:id :content] {:inner true})
+      ;; => \"messages!inner(id,content)\"
+      (embed \"users\" [:name] {:as \"author\" :hint \"author_id\"})
+      ;; => \"author:users!author_id(name)\""
+  ([relation cols] (embed relation cols {}))
+  ([relation cols opts]
+   (let [col-str (cond
+                   (= "*" cols)       "*"
+                   (sequential? cols) (str/join "," (map name cols))
+                   :else              (str cols))
+         hint (when-let [h (:hint opts)] (str "!" (name h)))
+         join (cond (:inner opts) "!inner" (:left opts) "!left" :else "")
+         prefix (when-let [a (:as opts)] (str (name a) ":"))]
+     (str prefix (name relation) hint join "(" col-str ")"))))
 
 (defn select
   "Builds a SELECT.
