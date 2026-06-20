@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.5.0...core-v0.6.0) (2026-06-20)
+
+
+### Features
+
+* **core:** make execute-async future cancel the in-flight request ([9b54fb2](https://github.com/supabase-community/supabase-clj/commit/9b54fb2816ee0e2ac391fcd49a598395a412bf78))
+
 ## [0.5.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.4.0...core-v0.5.0) (2026-05-27)
 
 
