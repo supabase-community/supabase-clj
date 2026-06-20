@@ -259,3 +259,183 @@
     (is (.contains url "provider=github"))
     (is (.contains url "redirect_to=https://app/cb"))
     (is (.contains url "scopes=read:user repo"))))
+
+;; ---------------------------------------------------------------------------
+;; verify-otp
+;; ---------------------------------------------------------------------------
+
+(deftest verify-otp-request-test
+  (let [creds {:type "email" :email "a@b.com" :token "123456"}
+        [_ req] (run-with-capture #(auth/verify-otp test-client creds))
+        body (parse-body req)]
+    (testing "POST /verify"
+      (is (= :post (:method req)))
+      (is (= (str base-url "/auth/v1/verify") (:url req))))
+    (testing "body has type/email/token"
+      (is (= "email" (get body "type")))
+      (is (= "a@b.com" (get body "email")))
+      (is (= "123456" (get body "token"))))))
+
+(deftest verify-otp-token-hash-test
+  (let [creds {:type "email" :token-hash "hash-abc"
+               :options {:redirect-to "https://app/cb"}}
+        [_ req] (run-with-capture #(auth/verify-otp test-client creds))
+        body (parse-body req)]
+    (is (= "hash-abc" (get body "token_hash")))
+    (is (not (contains? body "token")))
+    (is (= "https://app/cb" (get-in req [:query "redirect_to"])))))
+
+(deftest verify-otp-invalid-test
+  (testing "token without email or phone"
+    (is (error/anomaly? (auth/verify-otp test-client {:type "email" :token "x"}))))
+  (testing "neither token nor token-hash"
+    (is (error/anomaly? (auth/verify-otp test-client {:type "email" :email "a@b.com"})))))
+
+;; ---------------------------------------------------------------------------
+;; refresh-session / exchange-code-for-session
+;; ---------------------------------------------------------------------------
+
+(deftest refresh-session-request-test
+  (let [[_ req] (run-with-capture #(auth/refresh-session test-client "refresh-tok"))
+        body (parse-body req)]
+    (testing "POST /token grant_type=refresh_token"
+      (is (= :post (:method req)))
+      (is (= (str base-url "/auth/v1/token") (:url req)))
+      (is (= "refresh_token" (get-in req [:query "grant_type"]))))
+    (is (= "refresh-tok" (get body "refresh_token")))))
+
+(deftest exchange-code-for-session-request-test
+  (let [creds {:auth-code "code-1" :code-verifier "verifier-1"}
+        [_ req] (run-with-capture #(auth/exchange-code-for-session test-client creds))
+        body (parse-body req)]
+    (is (= "pkce" (get-in req [:query "grant_type"])))
+    (is (= "code-1" (get body "auth_code")))
+    (is (= "verifier-1" (get body "code_verifier")))))
+
+(deftest exchange-code-for-session-invalid-test
+  (is (error/anomaly? (auth/exchange-code-for-session test-client {:auth-code "x"}))))
+
+;; ---------------------------------------------------------------------------
+;; update-user
+;; ---------------------------------------------------------------------------
+
+(deftest update-user-request-test
+  (let [[_ req] (run-with-capture
+                 #(auth/update-user test-client "user-tok"
+                                    {:password "new-secret" :data {:k "v"}}))
+        body (parse-body req)]
+    (testing "PUT /user with the user's token"
+      (is (= :put (:method req)))
+      (is (= (str base-url "/auth/v1/user") (:url req)))
+      (is (= "Bearer user-tok" (get-in req [:headers "authorization"]))))
+    (is (= "new-secret" (get body "password")))
+    (is (= {"k" "v"} (get body "data")))))
+
+(deftest update-user-empty-invalid-test
+  (is (error/anomaly? (auth/update-user test-client "tok" {}))))
+
+;; ---------------------------------------------------------------------------
+;; resend
+;; ---------------------------------------------------------------------------
+
+(deftest resend-request-test
+  (let [creds {:type "signup" :email "a@b.com"
+               :options {:email-redirect-to "https://app/cb"}}
+        [_ req] (run-with-capture #(auth/resend test-client creds))
+        body (parse-body req)]
+    (is (= (str base-url "/auth/v1/resend") (:url req)))
+    (is (= "signup" (get body "type")))
+    (is (= "a@b.com" (get body "email")))
+    (is (= "https://app/cb" (get-in req [:query "redirect_to"])))))
+
+(deftest resend-invalid-test
+  (is (error/anomaly? (auth/resend test-client {:type "signup"}))))
+
+;; ---------------------------------------------------------------------------
+;; reset-password-for-email
+;; ---------------------------------------------------------------------------
+
+(deftest reset-password-for-email-request-test
+  (let [[_ req] (run-with-capture
+                 #(auth/reset-password-for-email test-client "a@b.com"
+                                                 {:redirect-to "https://app/reset"}))
+        body (parse-body req)]
+    (is (= (str base-url "/auth/v1/recover") (:url req)))
+    (is (= "a@b.com" (get body "email")))
+    (is (= "https://app/reset" (get-in req [:query "redirect_to"])))))
+
+;; ---------------------------------------------------------------------------
+;; reauthenticate
+;; ---------------------------------------------------------------------------
+
+(deftest reauthenticate-request-test
+  (let [[_ req] (run-with-capture #(auth/reauthenticate test-client "user-tok"))]
+    (is (= :get (:method req)))
+    (is (= (str base-url "/auth/v1/reauthenticate") (:url req)))
+    (is (= "Bearer user-tok" (get-in req [:headers "authorization"])))))
+
+;; ---------------------------------------------------------------------------
+;; identity linking
+;; ---------------------------------------------------------------------------
+
+(deftest link-identity-request-test
+  (let [[_ req] (run-with-capture
+                 #(auth/link-identity test-client "user-tok"
+                                      {:provider "github"
+                                       :options {:redirect-to "https://app/cb"}}))]
+    (is (= :get (:method req)))
+    (is (= (str base-url "/auth/v1/user/identities/authorize") (:url req)))
+    (is (= "Bearer user-tok" (get-in req [:headers "authorization"])))
+    (is (= "github" (get-in req [:query "provider"])))
+    (is (= "true" (get-in req [:query "skip_http_redirect"])))))
+
+(deftest unlink-identity-request-test
+  (let [[_ req] (run-with-capture
+                 #(auth/unlink-identity test-client "user-tok" "id-123"))]
+    (is (= :delete (:method req)))
+    (is (= (str base-url "/auth/v1/user/identities/id-123") (:url req)))
+    (is (= "Bearer user-tok" (get-in req [:headers "authorization"])))))
+
+(deftest get-user-identities-test
+  (with-redefs [http/execute (fn [_] {:status 200
+                                      :body {:identities [{:id "i1"} {:id "i2"}]}
+                                      :headers {}})]
+    (let [resp (auth/get-user-identities test-client "user-tok")]
+      (is (= 200 (:status resp)))
+      (is (= [{:id "i1"} {:id "i2"}] (:body resp))))))
+
+;; ---------------------------------------------------------------------------
+;; server observability
+;; ---------------------------------------------------------------------------
+
+(deftest get-server-health-test
+  (let [[_ req] (run-with-capture #(auth/get-server-health test-client))]
+    (is (= :get (:method req)))
+    (is (= (str base-url "/auth/v1/health") (:url req)))))
+
+(deftest get-server-settings-test
+  (let [[_ req] (run-with-capture #(auth/get-server-settings test-client))]
+    (is (= :get (:method req)))
+    (is (= (str base-url "/auth/v1/settings") (:url req)))))
+
+;; ---------------------------------------------------------------------------
+;; get-claims — HS256 falls back to server verification
+;; ---------------------------------------------------------------------------
+
+(defn- b64url [^String s]
+  (.encodeToString (java.util.Base64/getUrlEncoder) (.getBytes s "UTF-8")))
+
+(defn- fake-jwt [header payload]
+  (str (b64url (json/write-value-as-string header)) "."
+       (b64url (json/write-value-as-string payload)) "."
+       (b64url "sig")))
+
+(deftest get-claims-hs256-fallback-test
+  (let [token (fake-jwt {:alg "HS256" :typ "JWT"} {:sub "user-1" :role "authenticated"})]
+    (with-redefs [http/execute (fn [_] {:status 200 :body {:id "user-1"} :headers {}})]
+      (let [result (auth/get-claims test-client token)]
+        (is (= "user-1" (get-in result [:claims :sub])))
+        (is (= "HS256" (get-in result [:header :alg])))))))
+
+(deftest get-claims-malformed-test
+  (is (error/anomaly? (auth/get-claims test-client "not-a-jwt"))))

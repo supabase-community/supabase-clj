@@ -194,6 +194,157 @@
              [:data {:optional true} [:maybe :map]]
              [:captcha-token {:optional true} [:maybe :string]]]))
 
+(def VerifyOtp
+  "Schema for OTP / magic-link verification.
+
+  Either `:token` plus an `:email`/`:phone`, or a `:token-hash` from an email
+  link. See https://supabase.com/docs/reference/javascript/auth-verifyotp"
+  (m/schema [:and
+             [:map
+              {:closed true}
+              [:type [:enum "sms" "phone_change" "signup" "invite" "magiclink"
+                      "recovery" "email_change" "email" "phone"]]
+              [:email {:optional true} [:maybe :string]]
+              [:phone {:optional true} [:maybe :string]]
+              [:token {:optional true} [:maybe :string]]
+              [:token-hash {:optional true} [:maybe :string]]
+              [:options {:optional true} [:maybe [:map
+                                                  {:closed true}
+                                                  [:redirect-to {:optional true} [:maybe :string]]
+                                                  [:captcha-token {:optional true} [:maybe :string]]]]]]
+             [:fn {:error/message "provide token with email/phone, or a token-hash"}
+              (fn [{:keys [token token-hash email phone]}]
+                (or (and (some? token) (or (some? email) (some? phone)))
+                    (some? token-hash)))]]))
+
+(def UpdateUser
+  "Schema for updating the authenticated user.
+  See https://supabase.com/docs/reference/javascript/auth-updateuser"
+  (m/schema [:and
+             [:map
+              {:closed true}
+              [:email {:optional true} [:maybe :string]]
+              [:phone {:optional true} [:maybe :string]]
+              [:password {:optional true} [:maybe :string]]
+              [:nonce {:optional true} [:maybe :string]]
+              [:data {:optional true} [:maybe :map]]]
+             [:fn {:error/message "at least one attribute must be provided"}
+              (fn [m] (seq m))]]))
+
+(def Resend
+  "Schema for resending signup confirmation / OTP emails or SMS.
+  See https://supabase.com/docs/reference/javascript/auth-resend"
+  (m/schema [:and
+             [:map
+              {:closed true}
+              [:type [:enum "signup" "email_change" "sms" "phone_change"]]
+              [:email {:optional true} [:maybe :string]]
+              [:phone {:optional true} [:maybe :string]]
+              [:options {:optional true} [:maybe [:map
+                                                  {:closed true}
+                                                  [:email-redirect-to {:optional true} [:maybe :string]]
+                                                  [:captcha-token {:optional true} [:maybe :string]]]]]]
+             email-or-phone]))
+
+(def ResetPasswordForEmail
+  "Schema for triggering a password-recovery email.
+  See https://supabase.com/docs/reference/javascript/auth-resetpasswordforemail"
+  (m/schema [:map
+             {:closed true}
+             [:email :string]
+             [:options {:optional true} [:maybe [:map
+                                                 {:closed true}
+                                                 [:redirect-to {:optional true} [:maybe :string]]
+                                                 [:captcha-token {:optional true} [:maybe :string]]]]]]))
+
+(def ExchangeCodeForSession
+  "Schema for the PKCE code-for-session exchange.
+  See https://supabase.com/docs/reference/javascript/auth-exchangecodeforsession"
+  (m/schema [:map
+             {:closed true}
+             [:auth-code :string]
+             [:code-verifier :string]]))
+
+(def LinkIdentity
+  "Schema for linking an OAuth identity to the current user.
+  See https://supabase.com/docs/reference/javascript/auth-linkidentity"
+  (m/schema [:map
+             {:closed true}
+             [:provider #'Provider]
+             [:options {:optional true} [:maybe [:map
+                                                 {:closed true}
+                                                 [:redirect-to {:optional true} [:maybe :string]]
+                                                 [:scopes {:optional true} [:maybe [:vector :string]]]
+                                                 [:query-params {:optional true} [:maybe :map]]]]]]))
+
+;; ---------------------------------------------------------------------------
+;; Admin API schemas
+;; ---------------------------------------------------------------------------
+
+(def InviteUser
+  "Schema for `admin/invite-user-by-email`."
+  (m/schema [:map
+             {:closed true}
+             [:email :string]
+             [:options {:optional true} [:maybe [:map
+                                                 {:closed true}
+                                                 [:data {:optional true} [:maybe :map]]
+                                                 [:redirect-to {:optional true} [:maybe :string]]]]]]))
+
+(def GenerateLink
+  "Schema for `admin/generate-link`."
+  (m/schema [:map
+             {:closed true}
+             [:type [:enum "signup" "invite" "magiclink" "recovery"
+                     "email_change_current" "email_change_new"]]
+             [:email :string]
+             [:password {:optional true} [:maybe :string]]
+             [:new-email {:optional true} [:maybe :string]]
+             [:data {:optional true} [:maybe :map]]
+             [:options {:optional true} [:maybe [:map
+                                                 {:closed true}
+                                                 [:redirect-to {:optional true} [:maybe :string]]]]]]))
+
+(def AdminCreateUser
+  "Schema for `admin/create-user`."
+  (m/schema [:map
+             {:closed true}
+             [:email {:optional true} [:maybe :string]]
+             [:phone {:optional true} [:maybe :string]]
+             [:password {:optional true} [:maybe :string]]
+             [:email-confirm {:optional true} :boolean]
+             [:phone-confirm {:optional true} :boolean]
+             [:user-metadata {:optional true} [:maybe :map]]
+             [:app-metadata {:optional true} [:maybe :map]]
+             [:ban-duration {:optional true} [:maybe :string]]
+             [:role {:optional true} [:maybe :string]]]))
+
+(def AdminUpdateUser
+  "Schema for `admin/update-user-by-id`."
+  (m/schema [:map
+             {:closed true}
+             [:email {:optional true} [:maybe :string]]
+             [:phone {:optional true} [:maybe :string]]
+             [:password {:optional true} [:maybe :string]]
+             [:email-confirm {:optional true} :boolean]
+             [:phone-confirm {:optional true} :boolean]
+             [:nonce {:optional true} [:maybe :string]]
+             [:user-metadata {:optional true} [:maybe :map]]
+             [:app-metadata {:optional true} [:maybe :map]]
+             [:ban-duration {:optional true} [:maybe :string]]
+             [:role {:optional true} [:maybe :string]]]))
+
+(def ListUsers
+  "Schema for `admin/list-users` pagination options."
+  (m/schema [:map
+             {:closed true}
+             [:page {:optional true} :int]
+             [:per-page {:optional true} :int]]))
+
+(def SignOutScope
+  "Schema for the sign-out scope."
+  (m/schema [:enum "global" "local" "others"]))
+
 (def SignInRequest
   "Schema for the final Supabase Auth API request body, built from a sign-in schema.
   Used internally to encode the HTTP request sent to the auth server."
