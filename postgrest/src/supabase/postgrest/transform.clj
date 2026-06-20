@@ -87,12 +87,20 @@
     (set-accept req :pgrst-object)))
 
 (defn csv
-  "Return data as a CSV string."
+  "Return data as a CSV string.
+
+  Installs an identity body decoder so the response is returned as raw text
+  instead of being run through the default JSON decoder (which would, e.g.,
+  coerce a single-numeric-column CSV into a number). Parse the CSV with the
+  library of your choice."
   [req]
-  (http/with-headers req {"accept" "text/csv"}))
+  (-> req
+      (http/with-headers {"accept" "text/csv"})
+      (http/with-decoder identity)))
 
 (defn geojson
-  "Return data as a GeoJSON object."
+  "Return data as a GeoJSON object. The response is valid JSON and is
+  decoded into a map by the default decoder."
   [req]
   (http/with-headers req {"accept" "application/geo+json"}))
 

@@ -52,7 +52,8 @@
             [supabase.postgrest.error :as pg-error]
             [supabase.postgrest.filters :as filters]
             [supabase.postgrest.query :as query]
-            [supabase.postgrest.transform :as transform]))
+            [supabase.postgrest.transform :as transform])
+  (:import (java.util.concurrent CancellationException CompletableFuture)))
 
 ;; ---------------------------------------------------------------------------
 ;; Entry points
@@ -97,6 +98,30 @@
   (if (error/anomaly? req)
     req
     (-> req apply-profile-header http/execute pg-error/enrich)))
+
+(defn execute-async
+  "Async variant of [[execute]]. Returns a `CompletableFuture` resolving to
+  the same value [[execute]] would, with PostgREST error enrichment applied.
+
+  The future is cancellable: `(future-cancel fut)` aborts the in-flight
+  request (see `supabase.core.http/execute-async`). Wire it to a core.async
+  channel or any external cancel signal:
+
+      (let [fut (-> (pg/from c \"big_table\") (pg/select \"*\") (pg/execute-async))]
+        ;; on some signal:
+        (future-cancel fut))"
+  [req]
+  (if (error/anomaly? req)
+    (CompletableFuture/completedFuture req)
+    (let [fut (-> req apply-profile-header http/execute-async)
+          out (.thenApply fut (reify java.util.function.Function
+                                (apply [_ r] (pg-error/enrich r))))]
+      ;; Preserve cancellation across the enrichment stage.
+      (.whenComplete out (reify java.util.function.BiConsumer
+                           (accept [_ _ ex]
+                             (when (instance? CancellationException ex)
+                               (future-cancel fut)))))
+      out)))
 
 ;; ---------------------------------------------------------------------------
 ;; Re-exports — flat surface so callers `(pg/eq req col val)` etc.

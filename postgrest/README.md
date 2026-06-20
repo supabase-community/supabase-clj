@@ -157,6 +157,21 @@ timestamps, and booleans so you can pass them as filter values:
     (pg/execute))
 ```
 
+## Async & cancellation
+
+`execute-async` returns a cancellable `CompletableFuture`:
+
+```clojure
+(def fut (-> (pg/from c "big_table") (pg/select "*") (pg/execute-async)))
+
+@fut                  ;; blocks for the enriched result / anomaly
+
+(future-cancel fut)   ;; aborts the in-flight HTTP request
+```
+
+Wire it to a core.async channel or any external signal — e.g.
+`(go (when (<! cancel-ch) (future-cancel fut)))`.
+
 ## Error handling
 
 Anomaly maps follow `cognitect/anomalies` plus PostgREST decoration:
@@ -175,10 +190,6 @@ Anomaly maps follow `cognitect/anomalies` plus PostgREST decoration:
 
 Well-known codes refine `:cognitect.anomalies/category`: `PGRST116` →
 `:not-found`, `PGRST301` / `42501` → `:forbidden`.
-
-**Deferred:** Ecto-style schema decoder (`execute_to`), request cancellation
-seam, and a live-PostgREST integration suite (PostgreSQL session-var RLS
-helpers are out of scope for an HTTP client).
 
 ## License
 

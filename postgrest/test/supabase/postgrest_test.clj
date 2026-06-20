@@ -4,8 +4,10 @@
             [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.core.http :as http]
+            [supabase.core.transport :as transport]
             [supabase.postgrest :as pg]
-            [supabase.postgrest.encode :as enc]))
+            [supabase.postgrest.encode :as enc])
+  (:import (java.util.concurrent CompletableFuture)))
 
 (def base-url "https://abc123.supabase.co")
 (def test-client (client/make-client base-url "anon-key"))
@@ -313,7 +315,8 @@
 (deftest csv-accept-header
   (let [[_ req] (run-with-capture
                  #(-> (pg/from test-client "t") (pg/select "*") (pg/csv) (pg/execute)))]
-    (is (= "text/csv" (get-in req [:headers "accept"])))))
+    (is (= "text/csv" (get-in req [:headers "accept"])))
+    (is (= identity (:decoder req)) "raw-text decoder installed")))
 
 (deftest single-accept
   (let [[_ req] (run-with-capture
@@ -464,3 +467,31 @@
   (let [lo (java.time.Instant/parse "2026-01-01T00:00:00Z")
         hi (java.time.Instant/parse "2026-02-01T00:00:00Z")]
     (is (= "[2026-01-01T00:00:00Z,2026-02-01T00:00:00Z)" (enc/pg-range lo hi)))))
+
+;; ---------------------------------------------------------------------------
+;; execute-async
+;; ---------------------------------------------------------------------------
+
+(deftest execute-async-enriches-anomaly
+  (with-redefs [http/execute-async
+                (fn [_]
+                  (CompletableFuture/completedFuture
+                   (error/from-http-response 406 {:message "no rows" :code "PGRST116"}
+                                             :postgrest)))]
+    (let [res @(pg/execute-async (-> (pg/from test-client "t") (pg/single)))]
+      (is (= :cognitect.anomalies/not-found (:cognitect.anomalies/category res)))
+      (is (= "PGRST116" (:postgrest/code res))))))
+
+(deftest execute-async-short-circuits-bad-client
+  (let [res @(pg/execute-async (pg/from {} "t"))]
+    (is (error/anomaly? res))))
+
+(deftest execute-async-cancellation
+  (let [raw (CompletableFuture.)
+        t (reify transport/Transport
+            (execute [_ _] (throw (UnsupportedOperationException.)))
+            (execute-async [_ _] raw))
+        c (client/make-client base-url "anon-key" :transport t)
+        fut (pg/execute-async (-> (pg/from c "t") (pg/select "*")))]
+    (is (true? (future-cancel fut)))
+    (is (true? (.isCancelled raw)) "cancellation reaches the in-flight request")))
