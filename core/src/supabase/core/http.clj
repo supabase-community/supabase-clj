@@ -55,7 +55,8 @@
             [clojure.tools.logging :as log]
             [jsonista.core :as json]
             [supabase.core.error :as error]
-            [supabase.core.transport :as transport]))
+            [supabase.core.transport :as transport])
+  (:import (java.util.concurrent CompletableFuture)))
 
 (def ^:private json-mapper (json/object-mapper {:decode-key-fn true}))
 
@@ -328,23 +329,43 @@
 
 (defn execute-async
   "Executes the request asynchronously. Returns a `CompletableFuture`
-  that resolves to the same value [[execute]] would return."
+  that resolves to the same value [[execute]] would return.
+
+  ## Cancellation
+
+  The returned future is cancellable: calling `(future-cancel fut)` (or
+  `(.cancel fut true)`) aborts the in-flight HTTP request by cancelling
+  the underlying transport future. Useful to wire a core.async
+  `:cancel-ch` or any external cancel signal:
+
+      (def fut (http/execute-async req))
+      ;; later, on some signal:
+      (future-cancel fut)"
   [req]
   (log-request req)
   (let [t (transport/resolve-transport req)
         start (System/nanoTime)
-        handle (fn [raw]
-                 (let [result (handle-response raw req)
-                       elapsed (long (/ (- (System/nanoTime) start) 1000000))]
-                   (log-response req result elapsed)
-                   result))
-        on-error (fn [^Throwable ex]
-                   (let [result (error/from-exception ex (:service req))
-                         elapsed (long (/ (- (System/nanoTime) start) 1000000))]
-                     (log-response req result elapsed)
-                     result))]
-    (-> (transport/execute-async t (build-transport-request req))
-        (.thenApply (reify java.util.function.Function
-                      (apply [_ raw] (handle raw))))
-        (.exceptionally (reify java.util.function.Function
-                          (apply [_ ex] (on-error ex)))))))
+        raw (transport/execute-async t (build-transport-request req))
+        result (CompletableFuture.)
+        finish (fn [value]
+                 (let [elapsed (long (/ (- (System/nanoTime) start) 1000000))]
+                   (log-response req value elapsed)
+                   value))]
+    ;; Bridge the transport future into one we control, so cancellation of
+    ;; `result` can be propagated back to the in-flight request.
+    (.whenComplete
+     ^CompletableFuture raw
+     (reify java.util.function.BiConsumer
+       (accept [_ resp ex]
+         (when-not (.isCancelled result)
+           (if ex
+             (let [cause (or (.getCause ^Throwable ex) ex)]
+               (.complete result (finish (error/from-exception cause (:service req)))))
+             (.complete result (finish (handle-response resp req))))))))
+    (.whenComplete
+     result
+     (reify java.util.function.BiConsumer
+       (accept [_ _ ex]
+         (when (instance? java.util.concurrent.CancellationException ex)
+           (future-cancel raw)))))
+    result))

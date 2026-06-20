@@ -343,6 +343,21 @@
       (is (instance? CompletableFuture fut))
       (is (= {:async true} (:body @fut))))))
 
+(deftest execute-async-cancellation-test
+  (testing "cancelling the returned future cancels the in-flight request"
+    (let [raw (CompletableFuture.)
+          t (reify transport/Transport
+              (execute [_ _] (throw (UnsupportedOperationException.)))
+              (execute-async [_ _] raw))
+          fut (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute-async)]
+      (is (false? (.isDone raw)))
+      (is (true? (future-cancel fut)))
+      (is (true? (.isCancelled fut)))
+      (is (true? (.isCancelled raw)) "underlying transport future is cancelled"))))
+
 (deftest execute-exception-test
   (testing "exceptions raised by transport become fault anomalies"
     (let [t (reify transport/Transport
