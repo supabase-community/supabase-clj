@@ -7,16 +7,12 @@ aggregations, RPC, EXPLAIN.
 
 ## Installation
 
-<!-- x-release-please-start-version -->
-
 ```clojure
 ;; deps.edn
 {:deps
  {io.github.supabase-community/core {:mvn/version "1.0.0"}
-  io.github.supabase-community/postgrest {:mvn/version "1.0.0"}}}
+  io.github.supabase-community/postgrest {:mvn/version "1.0.0"}}} ;; x-release-please-version
 ```
-
-<!-- x-release-please-end -->
 
 ## Quick Start
 

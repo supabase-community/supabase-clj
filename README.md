@@ -2,8 +2,6 @@
 
 Supabase Community Clojure SDK
 
-<!-- x-release-please-start-version -->
-
 ```clojure
 ;; deps.edn
 {:deps
@@ -14,8 +12,6 @@ Supabase Community Clojure SDK
    io.github.supabase-community/functions {:mvn/version "0.1.0"}  ;; edge functions integration
    io.github.supabase-community/realtime  {:mvn/version "0.1.0"}}} ;; realtime integration
 ```
-
-<!-- x-release-please-end -->
 
 Individual product client documentation:
 

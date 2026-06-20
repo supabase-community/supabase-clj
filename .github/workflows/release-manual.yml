@@ -1,0 +1,92 @@
+name: Release (manual)
+
+# Manual one-shot release for a single module via bin/release.clj (bb release).
+# Bumps version.txt + every README install snippet (incl. cross-service refs that
+# release-please structurally cannot bump) + source version block + CHANGELOG +
+# the release-please manifest, then commits to main, tags `<module>-v<version>`,
+# and creates a GitHub release. The release event triggers publish.yml -> Clojars.
+#
+# Use this for: first releases, hotfixes, or refreshing cross-service README pins.
+# Normal feature releases still go through release-please (PR merge).
+#
+# IMPORTANT: do NOT run this for a module that has an open release-please release
+# PR — `bb release` bumps the manifest ahead, leaving that PR stale. Close it first.
+#
+# Requires the RELEASE_PLEASE_TOKEN PAT (same secret release-please uses): a release
+# created by the default GITHUB_TOKEN would NOT trigger publish.yml, so we push and
+# create the release with the PAT instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Module to release"
+        required: true
+        type: choice
+        options:
+          - core
+          - auth
+          - storage
+          - realtime
+          - postgrest
+          - functions
+      version:
+        description: "Semver version (X.Y.Z)"
+        required: true
+        type: string
+      notes:
+        description: "Release notes (optional)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          # Full history + tags: bin/release.clj's tag-free check and CHANGELOG
+          # compare-link both inspect existing `<module>-v*` tags.
+          fetch-depth: 0
+          # PAT so the push + release trigger downstream workflows (publish.yml).
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: DeLaGuardo/setup-clojure@13.2
+        with:
+          cli: latest
+          bb: latest
+
+      - name: Cache Maven deps
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-${{ hashFiles('**/deps.edn') }}
+          restore-keys: m2-
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          # Passed via env (not inline ${{ }}) to avoid shell injection.
+          MODULE: ${{ inputs.module }}
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          if [ -n "$NOTES" ]; then
+            bb release "$MODULE" "$VERSION" --notes "$NOTES"
+          else
+            bb release "$MODULE" "$VERSION"
+          fi
