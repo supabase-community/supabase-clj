@@ -52,12 +52,61 @@
              [:search {:optional true} :string]]))
 
 (def FileOptions
-  "Schema for upload options."
+  "Schema for upload/update options."
   (m/schema [:map
              {:closed true}
              [:cache-control {:optional true} :string]
              [:content-type {:optional true} :string]
              [:upsert {:optional true} :boolean]
+             [:metadata {:optional true} [:map-of :string :string]]
+             [:headers {:optional true} [:map-of :string :string]]]))
+
+(def TransformOptions
+  "Schema for image transformation options applied on render.
+
+  * `:width` / `:height` — target size in pixels
+  * `:resize` — `\"cover\"` (default), `\"contain\"`, `\"fill\"`
+  * `:quality` — 20–100 (default 80)
+  * `:format` — e.g. `\"origin\"`, `\"webp\"`"
+  (m/schema [:map
+             {:closed true}
+             [:width {:optional true} :int]
+             [:height {:optional true} :int]
+             [:resize {:optional true} [:enum "cover" "contain" "fill"
+                                        :cover :contain :fill]]
+             [:quality {:optional true} [:int {:min 20 :max 100}]]
+             [:format {:optional true} :string]]))
+
+(def ListV2Options
+  "Schema for cursor-based list-v2 pagination options.
+
+  * `:limit` — page size (default server-side 100)
+  * `:cursor` — pagination cursor from a previous response
+  * `:with-delimiter` — group by folder hierarchy when true"
+  (m/schema [:map
+             {:closed true}
+             [:limit {:optional true} :int]
+             [:cursor {:optional true} :string]
+             [:with-delimiter {:optional true} :boolean]]))
+
+(def SignedUploadOpts
+  "Schema for create-signed-upload-url options."
+  (m/schema [:map
+             {:closed true}
+             [:upsert {:optional true} :boolean]]))
+
+(def DownloadOpts
+  "Schema for download options.
+
+  * `:response-as` — `:byte-array` (default) or `:stream`
+  * `:range` — `[start end]` byte range (inclusive) for partial downloads
+  * `:transform` — image transformation options (renders via render/image)
+  * `:headers` — extra request headers"
+  (m/schema [:map
+             {:closed true}
+             [:response-as {:optional true} [:enum :byte-array :stream]]
+             [:range {:optional true} [:tuple :int :int]]
+             [:transform {:optional true} #'TransformOptions]
              [:headers {:optional true} [:map-of :string :string]]]))
 
 (def MoveCopyOpts
@@ -73,7 +122,8 @@
   (m/schema [:map
              {:closed true}
              [:expires-in :int]
-             [:download {:optional true} [:or :boolean :string]]]))
+             [:download {:optional true} [:or :boolean :string]]
+             [:transform {:optional true} #'TransformOptions]]))
 
 (def SignedUrlsOpts
   "Schema for create-signed-urls options."
@@ -86,7 +136,8 @@
   "Schema for get-public-url options."
   (m/schema [:map
              {:closed true}
-             [:download {:optional true} [:or :boolean :string]]]))
+             [:download {:optional true} [:or :boolean :string]]
+             [:transform {:optional true} #'TransformOptions]]))
 
 (def UploadBody
   "Schema for upload body — bytes, InputStream, File, or string."
