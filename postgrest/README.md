@@ -11,7 +11,7 @@ aggregations, RPC, EXPLAIN.
 ;; deps.edn
 {:deps
  {io.github.supabase-community/core {:mvn/version "1.0.0"}
-  io.github.supabase-community/postgrest {:mvn/version "1.0.0"}}} ;; x-release-please-version
+  io.github.supabase-community/postgrest {:mvn/version "1.1.0"}}} ;; x-release-please-version
 ```
 
 ## Quick Start
