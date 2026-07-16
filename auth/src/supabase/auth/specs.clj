@@ -345,6 +345,41 @@
   "Schema for the sign-out scope."
   (m/schema [:enum "global" "local" "others"]))
 
+;; ---------------------------------------------------------------------------
+;; MFA schemas
+;; ---------------------------------------------------------------------------
+
+(def MFAEnroll
+  "Schema for `mfa/enroll`."
+  (m/schema [:and
+             [:map
+              {:closed true}
+              [:factor-type [:enum "totp" "phone" "webauthn"]]
+              [:friendly-name {:optional true} [:maybe :string]]
+              [:issuer {:optional true} [:maybe :string]]
+              [:phone {:optional true} [:maybe :string]]]
+             [:fn {:error/message "phone factors require a :phone number"}
+              (fn [{:keys [factor-type phone]}]
+                (or (not= "phone" factor-type) (some? phone)))]]))
+
+(def MFAChallenge
+  "Schema for `mfa/challenge`."
+  (m/schema [:map
+             {:closed true}
+             [:channel {:optional true} [:enum "sms" "whatsapp"]]
+             [:webauthn {:optional true} [:maybe :map]]]))
+
+(def MFAVerify
+  "Schema for `mfa/verify`."
+  (m/schema [:and
+             [:map
+              {:closed true}
+              [:code {:optional true} [:maybe :string]]
+              [:webauthn {:optional true} [:maybe :map]]]
+             [:fn {:error/message "provide either :code or :webauthn"}
+              (fn [{:keys [code webauthn]}]
+                (or (some? code) (some? webauthn)))]]))
+
 (def SignInRequest
   "Schema for the final Supabase Auth API request body, built from a sign-in schema.
   Used internally to encode the HTTP request sent to the auth server."
