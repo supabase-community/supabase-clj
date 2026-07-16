@@ -622,3 +622,95 @@
           (http/with-method :get)
           (http/with-service-url :auth-url settings-uri)
           (http/execute))))
+
+;; ---------------------------------------------------------------------------
+;; Session lifecycle helpers
+;; ---------------------------------------------------------------------------
+
+;; A \"session\" here is the token payload the auth server returns from
+;; sign-in / `verify-otp` / `refresh-session` — the `:body` of those
+;; responses. Keys are accepted in both response form (`:access_token`) and
+;; kebab form (`:access-token`).
+
+(defn- session-get [session k]
+  (or (get session k)
+      (get session (keyword (str/replace (name k) "-" "_")))))
+
+(defn- now-secs []
+  (quot (System/currentTimeMillis) 1000))
+
+(defn needs-refresh?
+  "True when `session` is expired or expires within `:within` seconds
+  (default 300). A session without expiry information never needs refresh.
+
+  ## Example
+
+      (needs-refresh? session)
+      (needs-refresh? session {:within 60})"
+  ([session] (needs-refresh? session {}))
+  ([session {:keys [within] :or {within 300}}]
+   (if-let [expires-at (session-get session :expires-at)]
+     (<= (- expires-at (now-secs)) within)
+     false)))
+
+(defn- refresh-to-session [client session]
+  (let [resp (refresh-session client (session-get session :refresh-token))]
+    (if (error/anomaly? resp)
+      resp
+      (:body resp))))
+
+(defn refresh-if-needed
+  "Refreshes `session` when it is expired or about to expire, otherwise
+  returns it unchanged. Useful for proactive refresh in request handlers.
+
+  Returns the (possibly new) session map, or an anomaly when the refresh
+  call fails.
+
+  ## Options
+
+  * `:within` — seconds before expiry that trigger a refresh (default 300)
+  * `:force` — refresh regardless of expiry
+
+  ## Example
+
+      (refresh-if-needed client session)
+      (refresh-if-needed client session {:within 60})
+      (refresh-if-needed client session {:force true})"
+  ([client session] (refresh-if-needed client session {}))
+  ([client session opts]
+   (or (client/ensure-client client)
+       (if (or (:force opts) (needs-refresh? session opts))
+         (refresh-to-session client session)
+         session))))
+
+(defn ensure-valid-session
+  "Validates `session` and refreshes it when needed, in one operation.
+
+  Returns a session map that is neither expired nor about to expire, or an
+  anomaly: `:cognitect.anomalies/incorrect` when the session is missing its
+  tokens, or the refresh call's anomaly when the refresh fails.
+
+  ## Options
+
+  * `:within` — seconds before expiry that trigger a refresh (default 300)
+
+  ## Example
+
+      (let [session (ensure-valid-session client session)]
+        (if (error/anomaly? session)
+          (redirect-to-login)
+          (make-api-call session)))"
+  ([client session] (ensure-valid-session client session {}))
+  ([client session opts]
+   (or (client/ensure-client client)
+       (cond
+         (not (and (session-get session :access-token)
+                   (session-get session :refresh-token)))
+         (error/anomaly :cognitect.anomalies/incorrect
+                        {:cognitect.anomalies/message "Invalid session: missing tokens"
+                         :supabase/service :auth})
+
+         (needs-refresh? session opts)
+         (refresh-to-session client session)
+
+         :else session))))
