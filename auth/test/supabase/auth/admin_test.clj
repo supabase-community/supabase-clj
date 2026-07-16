@@ -101,6 +101,16 @@
     (is (= :delete (:method req)))
     (is (= (str base-url "/auth/v1/admin/users/uid-1/factors/f-1") (:url req)))))
 
+(deftest list-identities-test
+  (let [[_ req] (run-with-capture #(admin/list-identities test-client "uid-1"))]
+    (is (= :get (:method req)))
+    (is (= (str base-url "/auth/v1/admin/users/uid-1/identities") (:url req)))))
+
+(deftest delete-identity-test
+  (let [[_ req] (run-with-capture #(admin/delete-identity test-client "uid-1" "id-1"))]
+    (is (= :delete (:method req)))
+    (is (= (str base-url "/auth/v1/admin/users/uid-1/identities/id-1") (:url req)))))
+
 (deftest sign-out-test
   (testing "default global scope"
     (let [[_ req] (run-with-capture #(admin/sign-out test-client "user-tok"))]
