@@ -91,6 +91,16 @@
     (let [[_ req] (run-with-capture #(admin/delete-user test-client "uid-1" {:soft? true}))]
       (is (= true (get (parse-body req) "should_soft_delete"))))))
 
+(deftest list-factors-test
+  (let [[_ req] (run-with-capture #(admin/list-factors test-client "uid-1"))]
+    (is (= :get (:method req)))
+    (is (= (str base-url "/auth/v1/admin/users/uid-1/factors") (:url req)))))
+
+(deftest delete-factor-test
+  (let [[_ req] (run-with-capture #(admin/delete-factor test-client "uid-1" "f-1"))]
+    (is (= :delete (:method req)))
+    (is (= (str base-url "/auth/v1/admin/users/uid-1/factors/f-1") (:url req)))))
+
 (deftest sign-out-test
   (testing "default global scope"
     (let [[_ req] (run-with-capture #(admin/sign-out test-client "user-tok"))]

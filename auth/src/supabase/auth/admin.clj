@@ -34,7 +34,7 @@
 
 (defn- users-path
   ([] users-uri)
-  ([id] (str users-uri "/" id)))
+  ([id & segments] (str/join "/" (into [users-uri id] segments))))
 
 (defn invite-user-by-email
   "Sends an invite email to `email`, creating the user in an unconfirmed state.
@@ -191,6 +191,32 @@
            (http/with-service-url :auth-url (users-path id))
            (http/with-body {:should_soft_delete (boolean soft?)})
            (http/execute)))))
+
+(defn list-factors
+  "Lists the MFA factors enrolled for user `id`.
+
+  ## Example
+
+      (list-factors client \"<user-id>\")"
+  [client id]
+  (or (client/ensure-client client)
+      (-> (http/request client)
+          (http/with-method :get)
+          (http/with-service-url :auth-url (users-path id "factors"))
+          (http/execute))))
+
+(defn delete-factor
+  "Deletes the MFA factor `factor-id` from user `id`. Permanent.
+
+  ## Example
+
+      (delete-factor client \"<user-id>\" \"<factor-id>\")"
+  [client id factor-id]
+  (or (client/ensure-client client)
+      (-> (http/request client)
+          (http/with-method :delete)
+          (http/with-service-url :auth-url (users-path id "factors" factor-id))
+          (http/execute))))
 
 (defn sign-out
   "Revokes sessions for the user identified by `access-token`.
