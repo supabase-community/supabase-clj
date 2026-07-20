@@ -44,7 +44,7 @@
   (with-conn
     (fn [conn _]
       (is (map? conn))
-      (is (some? (:transport conn)))
+      (is (some? (:transport @(:state conn))))
       (is (some? (:state conn))))))
 
 ;; ---------------------------------------------------------------------------

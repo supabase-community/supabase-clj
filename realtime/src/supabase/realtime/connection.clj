@@ -102,13 +102,22 @@
   {:status   :connecting
    :ref-seq  0
    :channels {}
-   :send-buf []})
+   :send-buf []
+   :transport nil
+   :reconnect-attempts 0
+   :closing? false})
 
 (defn- new-ref [state-atom]
   (-> (swap! state-atom update :ref-seq inc) :ref-seq str))
 
 (defn- open? [state-atom]
   (= :open (:status @state-atom)))
+
+(defn- transport
+  "Current transport for `conn`. Lives in the state atom so a reconnect can
+  swap it without invalidating channel maps holding `conn`."
+  [conn]
+  (:transport @(:state conn)))
 
 ;; ---------------------------------------------------------------------------
 ;; Send + buffering
@@ -120,13 +129,13 @@
   [conn frame]
   (let [text (proto/encode frame)]
     (if (open? (:state conn))
-      (do (send-text (:transport conn) text) true)
+      (do (send-text (transport conn) text) true)
       (do (swap! (:state conn) update :send-buf conj text) false))))
 
 (defn- flush-send-buf! [conn]
   (let [[old _] (swap-vals! (:state conn) assoc :send-buf [])]
     (doseq [text (:send-buf old)]
-      (try (send-text (:transport conn) text)
+      (try (send-text (transport conn) text)
            (catch Throwable t
              (when-let [f (:on-error conn)] (f (error/from-exception t :realtime))))))))
 
@@ -209,7 +218,7 @@
                                 (constantly []))
             pushes (get-in old [:channels topic :push-buf])]
         (doseq [text pushes]
-          (try (send-text (:transport conn) text)
+          (try (send-text (transport conn) text)
                (catch Throwable t
                  (when-let [f (:on-error conn)]
                    (f (error/from-exception t :realtime)))))))
@@ -366,12 +375,91 @@
                               (when (open? (:state conn))
                                 (let [ref (new-ref (:state conn))
                                       frame (proto/heartbeat-frame ref)]
-                                  (send-text (:transport conn) (proto/encode frame))))
+                                  (send-text (transport conn) (proto/encode frame))))
                               (catch Throwable t
                                 (when-let [f (:on-error conn)]
                                   (f (error/from-exception t :realtime))))))
                           interval-ms interval-ms TimeUnit/MILLISECONDS)
     exec))
+
+;; ---------------------------------------------------------------------------
+;; Reconnect
+;; ---------------------------------------------------------------------------
+
+(def ^:private max-backoff-ms 10000)
+
+(defn default-reconnect-after-ms
+  "Default backoff: `min(10s, 2s^tries)` — 2s, 4s, 8s, then 10s cap.
+  Matches realtime-ex."
+  [tries]
+  (min max-backoff-ms (long (Math/pow 2000 (max 1 tries)))))
+
+(defn- mark-channels-disconnected!
+  "Flips every :joined/:joining channel back to :idle, keeping `:join-ref`
+  as the 'was subscribed' marker for rejoin."
+  [conn]
+  (swap! (:state conn) update :channels
+         (fn [channels]
+           (into {} (map (fn [[topic cs]]
+                           [topic (if (#{:joined :joining} (:state cs))
+                                    (assoc cs :state :idle)
+                                    cs)]))
+                 channels))))
+
+(defn- rejoin-channels!
+  "Re-subscribes every channel that was joined before the drop (non-nil
+  `:join-ref`, not leaving): fresh `phx_join` with stored config + bindings."
+  [conn]
+  (let [client (:client conn)
+        token (or (:access-token client) (:api-key client))
+        channels (:channels @(:state conn))]
+    (doseq [[topic cs] channels
+            :when (and (:join-ref cs) (#{:idle :errored} (:state cs)))]
+      (let [ref (new-ref (:state conn))
+            frame (proto/join-frame ref topic (:config cs) (:bindings cs) token)]
+        (update-channel! conn topic assoc :state :joining :join-ref ref)
+        (enqueue! conn frame)))))
+
+(declare schedule-reconnect!)
+
+(defn- attempt-reconnect!
+  "Opens a fresh transport via the stored factory. Failure reschedules."
+  [conn]
+  (when-not (:closing? @(:state conn))
+    (swap! (:state conn) update :reconnect-attempts inc)
+    (try
+      (let [t ((:transport-factory conn) (:url conn) (:headers conn) (:handlers conn))]
+        (swap! (:state conn) assoc :transport t :status :connecting))
+      (catch Throwable t
+        (when-let [f (:on-error conn)]
+          (f (error/from-exception t :realtime)))
+        (schedule-reconnect! conn)))))
+
+(defn- schedule-reconnect!
+  "Schedules the next reconnect attempt, or gives up with :errored when
+  `:max-reconnect-attempts` is exhausted."
+  [conn]
+  (let [{:keys [reconnect-attempts closing?]} @(:state conn)
+        max-attempts (:max-reconnect-attempts conn)]
+    (cond
+      closing? nil
+
+      (and max-attempts (>= reconnect-attempts max-attempts))
+      (do (swap! (:state conn) assoc :status :errored)
+          (when-let [f (:on-error conn)]
+            (f (error/anomaly :cognitect.anomalies/fault
+                              {:cognitect.anomalies/message "Realtime reconnect attempts exhausted"
+                               :supabase/service :realtime
+                               :supabase/code :reconnect-exhausted
+                               :realtime/attempts reconnect-attempts}))))
+
+      :else
+      (let [delay ((:reconnect-after-ms conn) (inc reconnect-attempts))]
+        (swap! (:state conn) assoc :status :reconnecting)
+        (.schedule ^ScheduledExecutorService (:reconnect-exec conn)
+                   ^Runnable (fn [] (attempt-reconnect! conn))
+                   delay TimeUnit/MILLISECONDS)
+        nil))))
 
 ;; ---------------------------------------------------------------------------
 ;; connect / disconnect
@@ -391,18 +479,21 @@
 (defn- on-open-handler [conn-promise]
   (fn []
     (when-let [conn @conn-promise]
-      (swap! (:state conn) assoc :status :open)
-      (flush-send-buf! conn))))
+      (swap! (:state conn) assoc :status :open :reconnect-attempts 0)
+      (flush-send-buf! conn)
+      (rejoin-channels! conn))))
 
 (defn- on-close-handler [conn-promise]
   (fn [_code _reason]
     (when-let [conn @conn-promise]
-      (swap! (:state conn) assoc :status :closed))))
+      (if (:closing? @(:state conn))
+        (swap! (:state conn) assoc :status :closed)
+        (do (mark-channels-disconnected! conn)
+            (schedule-reconnect! conn))))))
 
 (defn- on-error-handler [conn-promise]
   (fn [err]
     (when-let [conn @conn-promise]
-      (swap! (:state conn) assoc :status :errored)
       (when-let [f (:on-error conn)]
         (f (error/from-exception err :realtime))))))
 
@@ -411,49 +502,76 @@
 
   ## Options
 
-    - `:on-error`           — `(fn [anomaly])` for async transport/server errors
-    - `:heartbeat-ms`       — heartbeat interval in ms (default 30000)
-    - `:params`             — extra query params merged into the WS URL
-    - `:transport-factory`  — `(fn [url headers handlers])` returning a
-                              `Transport`. Defaults to `ws-transport`.
-                              Useful for tests.
+    - `:on-error`               — `(fn [anomaly])` for async transport/server errors
+    - `:heartbeat-ms`           — heartbeat interval in ms (default 30000)
+    - `:params`                 — extra query params merged into the WS URL
+    - `:transport-factory`      — `(fn [url headers handlers])` returning a
+                                  `Transport`. Defaults to `ws-transport`.
+                                  Useful for tests.
+    - `:auto-reconnect?`        — reconnect on unexpected close (default true)
+    - `:reconnect-after-ms`     — `(fn [tries])` → delay before attempt `tries`.
+                                  Defaults to `default-reconnect-after-ms`.
+    - `:max-reconnect-attempts` — give up after N attempts (default: never)
 
-  Returns a connection map: `{:client :transport :state :on-error :heartbeat}`,
-  or an anomaly on failure."
+  Returns a connection map, or an anomaly on failure."
   ([client] (connect client {}))
   ([client opts]
-   (let [{:keys [on-error heartbeat-ms params transport-factory]
+   (let [{:keys [on-error heartbeat-ms params transport-factory
+                 auto-reconnect? reconnect-after-ms max-reconnect-attempts]
           :or   {heartbeat-ms 30000
-                 transport-factory ws-transport}} opts
+                 transport-factory ws-transport
+                 auto-reconnect? true
+                 reconnect-after-ms default-reconnect-after-ms}} opts
          url (build-ws-url client (or params {}))
          headers (upgrade-headers client)
          state (atom (initial-state))
          conn-promise (atom nil)
          handlers {:on-open  (on-open-handler conn-promise)
                    :on-text  (on-text-handler conn-promise)
-                   :on-close (on-close-handler conn-promise)
-                   :on-error (on-error-handler conn-promise)}]
+                   :on-close (if auto-reconnect?
+                               (on-close-handler conn-promise)
+                               (fn [_ _]
+                                 (when-let [conn @conn-promise]
+                                   (swap! (:state conn) assoc :status :closed))))
+                   :on-error (on-error-handler conn-promise)}
+         reconnect-exec (Executors/newSingleThreadScheduledExecutor
+                         (reify java.util.concurrent.ThreadFactory
+                           (newThread [_ r]
+                             (doto (Thread. r "supabase-realtime-reconnect")
+                               (.setDaemon true)))))]
      (try
-       (let [transport (transport-factory url headers handlers)
+       (let [t (transport-factory url headers handlers)
              conn {:client    client
-                   :transport transport
                    :state     state
-                   :on-error  on-error}
+                   :on-error  on-error
+                   :url       url
+                   :headers   headers
+                   :handlers  handlers
+                   :transport-factory transport-factory
+                   :reconnect-after-ms reconnect-after-ms
+                   :max-reconnect-attempts max-reconnect-attempts
+                   :reconnect-exec reconnect-exec}
+             _ (swap! state assoc :transport t)
              heartbeat (start-heartbeat! conn heartbeat-ms)
              conn (assoc conn :heartbeat heartbeat)]
          (reset! conn-promise conn)
          conn)
        (catch Throwable t
+         (.shutdownNow reconnect-exec)
          (error/from-exception t :realtime))))))
 
 (defn disconnect
-  "Closes the connection: stops the heartbeat, closes the socket, and marks
-  state as `:closed`. Idempotent."
+  "Closes the connection: stops the heartbeat and reconnect timer, closes the
+  socket, and marks state as `:closed`. Idempotent; no reconnect is
+  scheduled."
   [conn]
   (when conn
+    (swap! (:state conn) assoc :closing? true)
     (when-let [^ScheduledExecutorService exec (:heartbeat conn)]
       (.shutdownNow exec))
-    (try (close! (:transport conn) 1000 "client closing")
+    (when-let [^ScheduledExecutorService exec (:reconnect-exec conn)]
+      (.shutdownNow exec))
+    (try (close! (transport conn) 1000 "client closing")
          (catch Throwable _ nil))
     (swap! (:state conn) assoc :status :closed)
     conn))
