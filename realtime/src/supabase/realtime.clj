@@ -32,8 +32,8 @@
   In:  postgres_changes, broadcast send/receive, basic presence,
        manual `set-auth`, heartbeat, multi-channel per connection.
 
-  Out (deferred): auto-reconnect, broadcast ack/wait_for_ack, HTTP fallback,
-       binary v2 protocol, exponential backoff, auto token refresh."
+  Out (deferred): broadcast ack/wait_for_ack, HTTP fallback,
+       binary v2 protocol, auto token refresh."
   (:require [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.realtime.connection :as conn]
@@ -62,7 +62,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- valid-conn? [c]
-  (and (map? c) (:state c) (:transport c)))
+  (and (map? c) (:state c) (:reconnect-exec c)))
 
 (defn channel
   "Returns a channel value bound to `conn` + `topic`. No network I/O.
@@ -219,7 +219,7 @@
   [ch-or-conn token]
   (cond
     ;; conn map
-    (and (map? ch-or-conn) (:transport ch-or-conn))
+    (and (map? ch-or-conn) (:state ch-or-conn) (:reconnect-exec ch-or-conn))
     (let [c ch-or-conn
           channels (-> @(:state c) :channels)]
       (doseq [[topic cs] channels
