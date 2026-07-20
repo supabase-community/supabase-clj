@@ -346,6 +346,55 @@
   (m/schema [:enum "global" "local" "others"]))
 
 ;; ---------------------------------------------------------------------------
+;; Admin custom provider schemas
+;; ---------------------------------------------------------------------------
+
+(def ListCustomProviders
+  "Schema for `admin.custom-providers/list-providers` options."
+  (m/schema [:map
+             {:closed true}
+             [:type {:optional true} [:enum "oauth2" "oidc"]]]))
+
+(def ^:private custom-provider-tuning
+  [[:acceptable-client-ids {:optional true} [:maybe [:vector :string]]]
+   [:scopes {:optional true} [:maybe [:vector :string]]]
+   [:pkce-enabled {:optional true} [:maybe :boolean]]
+   [:attribute-mapping {:optional true} [:maybe :map]]
+   [:authorization-params {:optional true} [:maybe :map]]
+   [:enabled {:optional true} [:maybe :boolean]]
+   [:email-optional {:optional true} [:maybe :boolean]]
+   [:issuer {:optional true} [:maybe :string]]
+   [:discovery-url {:optional true} [:maybe :string]]
+   [:skip-nonce-check {:optional true} [:maybe :boolean]]
+   [:authorization-url {:optional true} [:maybe :string]]
+   [:token-url {:optional true} [:maybe :string]]
+   [:userinfo-url {:optional true} [:maybe :string]]
+   [:jwks-uri {:optional true} [:maybe :string]]])
+
+(def CreateCustomProvider
+  "Schema for `admin.custom-providers/create-provider`."
+  (m/schema (into [:map
+                   {:closed true}
+                   [:provider-type [:enum "oauth2" "oidc"]]
+                   [:identifier :string]
+                   [:name :string]
+                   [:client-id :string]
+                   [:client-secret :string]]
+                  custom-provider-tuning)))
+
+(def UpdateCustomProvider
+  "Schema for `admin.custom-providers/update-provider`."
+  (m/schema [:and
+             (into [:map
+                    {:closed true}
+                    [:name {:optional true} [:maybe :string]]
+                    [:client-id {:optional true} [:maybe :string]]
+                    [:client-secret {:optional true} [:maybe :string]]]
+                   custom-provider-tuning)
+             [:fn {:error/message "at least one attribute must be provided"}
+              (fn [m] (seq m))]]))
+
+;; ---------------------------------------------------------------------------
 ;; MFA schemas
 ;; ---------------------------------------------------------------------------
 
