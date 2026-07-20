@@ -1,5 +1,6 @@
 (ns supabase.realtime-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.realtime :as rt]
@@ -194,6 +195,59 @@
                       :event "presence_state"
                       :payload {:userA [{:online_at 123}]}}))
         (is (= {:userA [{:online_at 123}]} (rt/presence-state ch)))))))
+
+;; ---------------------------------------------------------------------------
+;; broadcast acks
+;; ---------------------------------------------------------------------------
+
+(defn- join-channel! [rt ch]
+  (rt/subscribe ch)
+  ((:feed rt) (proto/encode
+               {:topic (:topic ch)
+                :event "phx_reply"
+                :ref "1"
+                :payload {:status "ok"
+                          :response {:postgres_changes []}}})))
+
+(deftest broadcast-with-ack-round-trip
+  (with-conn
+    (fn [conn rt]
+      ((:open rt))
+      (let [ch (rt/channel conn "r" {:config {:broadcast {:ack true}}})]
+        (join-channel! rt ch)
+        (let [ack-ref (rt/broadcast-with-ack ch "ping" {:n 1})]
+          (is (string? ack-ref))
+          (is (str/starts-with? ack-ref "ack:"))
+          (let [f (last-sent-frame rt)]
+            (is (= "broadcast" (:event f)))
+            (is (= ack-ref (:ref f))))
+          ;; server acks with a phx_reply carrying the ack ref
+          ((:feed rt) (proto/encode
+                       {:topic (:topic ch)
+                        :event "phx_reply"
+                        :ref ack-ref
+                        :payload {:status "ok" :response {}}}))
+          (is (= :acknowledged (rt/wait-for-ack ch ack-ref {:timeout-ms 500}))))))))
+
+(deftest wait-for-ack-times-out
+  (with-conn
+    (fn [conn rt]
+      ((:open rt))
+      (let [ch (rt/channel conn "r")]
+        (join-channel! rt ch)
+        (let [ack-ref (rt/broadcast-with-ack ch "ping" {})]
+          (let [res (rt/wait-for-ack ch ack-ref {:timeout-ms 50})]
+            (is (error/anomaly? res))
+            (is (= :ack-timeout (:supabase/code res)))))))))
+
+(deftest wait-for-ack-unknown-ref
+  (with-conn
+    (fn [conn rt]
+      ((:open rt))
+      (let [ch (rt/channel conn "r")
+            res (rt/wait-for-ack ch "ack:nope" {:timeout-ms 10})]
+        (is (error/anomaly? res))
+        (is (= :ack-not-found (:supabase/code res)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; unsubscribe removes channel after ack

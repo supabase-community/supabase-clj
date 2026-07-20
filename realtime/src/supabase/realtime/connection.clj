@@ -160,7 +160,8 @@
                            :join-ref nil
                            :bindings []
                            :presence {}
-                           :push-buf []})))]
+                           :push-buf []
+                           :pending-acks {}})))]
     (get-in s [:channels topic])))
 
 (defn update-channel!
@@ -237,12 +238,29 @@
                          :realtime/topic topic
                          :realtime/payload payload})))))
 
+(defn- handle-ack-reply
+  "Server ack for a `broadcast-with-ack` frame: the reply ref carries the
+  `ack:`-prefixed ref we sent. Delivers the pending promise on status ok —
+  the entry stays until `wait-for-ack` collects it (ack may land first)."
+  [conn frame]
+  (when (= "ok" (get-in frame [:payload :status]))
+    (let [topic (:topic frame)
+          ref (:ref frame)
+          p (get-in @(:state conn) [:channels topic :pending-acks ref])]
+      (when p (deliver p :acknowledged))))
+  nil)
+
 (defn- handle-phx-reply [conn frame]
   (let [payload (:payload frame)
         status (:status payload)
         topic (:topic frame)
+        ref (:ref frame)
         cs (channel-state conn topic)]
     (cond
+      ;; broadcast ack — ref carries our "ack:"-prefixed ref
+      (and (string? ref) (str/starts-with? ref "ack:"))
+      (handle-ack-reply conn frame)
+
       ;; reply to a phx_join we sent
       (and cs (= :joining (:state cs)) (= "ok" status))
       (handle-join-reply conn frame)
