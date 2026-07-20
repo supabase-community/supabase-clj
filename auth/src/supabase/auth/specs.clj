@@ -380,6 +380,43 @@
               (fn [{:keys [code webauthn]}]
                 (or (some? code) (some? webauthn)))]]))
 
+;; ---------------------------------------------------------------------------
+;; Admin OAuth client schemas
+;; ---------------------------------------------------------------------------
+
+(def ListOAuthClients
+  "Schema for `admin.oauth/list-clients` pagination options."
+  (m/schema [:map
+             {:closed true}
+             [:page {:optional true} :int]
+             [:per-page {:optional true} :int]]))
+
+(def CreateOAuthClient
+  "Schema for `admin.oauth/create-client`."
+  (m/schema [:map
+             {:closed true}
+             [:client-name :string]
+             [:redirect-uris [:vector {:min 1} :string]]
+             [:client-uri {:optional true} [:maybe :string]]
+             [:grant-types {:optional true} [:maybe [:vector :string]]]
+             [:response-types {:optional true} [:maybe [:vector :string]]]
+             [:scope {:optional true} [:maybe :string]]
+             [:token-endpoint-auth-method {:optional true} [:maybe :string]]]))
+
+(def UpdateOAuthClient
+  "Schema for `admin.oauth/update-client`."
+  (m/schema [:and
+             [:map
+              {:closed true}
+              [:client-name {:optional true} [:maybe :string]]
+              [:client-uri {:optional true} [:maybe :string]]
+              [:logo-uri {:optional true} [:maybe :string]]
+              [:redirect-uris {:optional true} [:maybe [:vector {:min 1} :string]]]
+              [:grant-types {:optional true} [:maybe [:vector :string]]]
+              [:token-endpoint-auth-method {:optional true} [:maybe :string]]]
+             [:fn {:error/message "at least one attribute must be provided"}
+              (fn [m] (seq m))]]))
+
 (def SignInRequest
   "Schema for the final Supabase Auth API request body, built from a sign-in schema.
   Used internally to encode the HTTP request sent to the auth server."
