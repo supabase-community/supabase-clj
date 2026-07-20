@@ -8,7 +8,7 @@ Authentication and user management for the Supabase Clojure SDK. Wraps the [Auth
 ;; deps.edn
 {:deps
  {io.github.supabase-community/core {:mvn/version "0.2.0"}
-  io.github.supabase-community/auth {:mvn/version "0.3.0"}}} ;; x-release-please-version
+  io.github.supabase-community/auth {:mvn/version "0.4.0"}}} ;; x-release-please-version
 ```
 
 ## Quick Start
