@@ -218,6 +218,32 @@
           (http/with-service-url :auth-url (users-path id "factors" factor-id))
           (http/execute))))
 
+(defn list-identities
+  "Lists the authentication identities linked to user `id`.
+
+  ## Example
+
+      (list-identities client \"<user-id>\")"
+  [client id]
+  (or (client/ensure-client client)
+      (-> (http/request client)
+          (http/with-method :get)
+          (http/with-service-url :auth-url (users-path id "identities"))
+          (http/execute))))
+
+(defn delete-identity
+  "Unlinks the identity `identity-id` from user `id`. Permanent.
+
+  ## Example
+
+      (delete-identity client \"<user-id>\" \"<identity-id>\")"
+  [client id identity-id]
+  (or (client/ensure-client client)
+      (-> (http/request client)
+          (http/with-method :delete)
+          (http/with-service-url :auth-url (users-path id "identities" identity-id))
+          (http/execute))))
+
 (defn sign-out
   "Revokes sessions for the user identified by `access-token`.
 
