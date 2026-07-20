@@ -439,3 +439,72 @@
 
 (deftest get-claims-malformed-test
   (is (error/anomaly? (auth/get-claims test-client "not-a-jwt"))))
+
+;; ---------------------------------------------------------------------------
+;; Session lifecycle helpers
+;; ---------------------------------------------------------------------------
+
+(defn- now-secs [] (quot (System/currentTimeMillis) 1000))
+
+(defn- session-expiring-in [secs]
+  {:access_token "at" :refresh_token "rt" :expires_at (+ (now-secs) secs)})
+
+(deftest needs-refresh?-test
+  (testing "no expiry information"
+    (is (false? (auth/needs-refresh? {:access_token "at" :refresh_token "rt"}))))
+  (testing "far from expiry"
+    (is (false? (auth/needs-refresh? (session-expiring-in 3600)))))
+  (testing "inside the default 300s window"
+    (is (true? (auth/needs-refresh? (session-expiring-in 100)))))
+  (testing "already expired"
+    (is (true? (auth/needs-refresh? (session-expiring-in -100)))))
+  (testing "custom window"
+    (is (true? (auth/needs-refresh? (session-expiring-in 3600) {:within 4000}))))
+  (testing "kebab-case keys accepted"
+    (is (true? (auth/needs-refresh? {:expires-at (now-secs)})))))
+
+(deftest refresh-if-needed-test
+  (testing "fresh session returned unchanged, no HTTP call"
+    (let [session (session-expiring-in 3600)
+          [result req] (run-with-capture #(auth/refresh-if-needed test-client session))]
+      (is (= session result))
+      (is (nil? req))))
+  (testing "expiring session triggers refresh and returns the new session"
+    (let [session (session-expiring-in 100)
+          new-session {:access_token "new-at" :refresh_token "new-rt"}]
+      (with-redefs [http/execute (fn [req]
+                                   (reset! captured req)
+                                   {:status 200 :body new-session :headers {}})]
+        (let [result (auth/refresh-if-needed test-client session)
+              req @captured]
+          (is (= new-session result))
+          (is (= (str base-url "/auth/v1/token") (:url req)))
+          (is (= "refresh_token" (get-in req [:query "grant_type"])))
+          (is (= "rt" (get (parse-body req) "refresh_token")))))))
+  (testing "force refreshes a fresh session"
+    (let [[_ req] (run-with-capture
+                   #(auth/refresh-if-needed test-client (session-expiring-in 3600)
+                                            {:force true}))]
+      (is (some? req))))
+  (testing "refresh anomaly propagates"
+    (let [anomaly {:cognitect.anomalies/category :cognitect.anomalies/unavailable}]
+      (with-redefs [http/execute (fn [_] anomaly)]
+        (is (error/anomaly? (auth/refresh-if-needed test-client (session-expiring-in 100))))))))
+
+(deftest ensure-valid-session-test
+  (testing "missing tokens"
+    (let [result (auth/ensure-valid-session test-client {:expires_at (now-secs)})]
+      (is (error/anomaly? result))
+      (is (= :cognitect.anomalies/incorrect (:cognitect.anomalies/category result)))))
+  (testing "fresh session returned unchanged"
+    (let [session (session-expiring-in 3600)
+          [result req] (run-with-capture #(auth/ensure-valid-session test-client session))]
+      (is (= session result))
+      (is (nil? req))))
+  (testing "expired session gets refreshed"
+    (let [session (session-expiring-in -100)
+          new-session {:access_token "new-at" :refresh_token "new-rt"}]
+      (with-redefs [http/execute (fn [_] {:status 200 :body new-session :headers {}})]
+        (is (= new-session (auth/ensure-valid-session test-client session))))))
+  (testing "invalid client"
+    (is (error/anomaly? (auth/ensure-valid-session {} (session-expiring-in 3600))))))
