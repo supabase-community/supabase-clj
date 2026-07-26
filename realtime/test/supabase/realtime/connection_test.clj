@@ -243,3 +243,101 @@
     (conn/disconnect conn)
     (is (= :closed (:status @(:state conn))))
     (is (= [1000 "client closing"] @(:close-args rt)))))
+
+;; ---------------------------------------------------------------------------
+;; Reconnect
+;; ---------------------------------------------------------------------------
+
+(defn counting-transports
+  "Like `recording-transport` but each factory call yields a fresh transport
+  and increments `:calls`. `:fail-after` makes factory calls beyond N throw."
+  ([] (counting-transports {}))
+  ([{:keys [fail-after]}]
+   (let [calls (atom 0)
+         sent (atom [])
+         handlers (atom nil)
+         factory (fn [_url _headers hs]
+                   (let [n (swap! calls inc)]
+                     (when (and fail-after (> n fail-after))
+                       (throw (ex-info "dial failed" {:attempt n})))
+                     (reset! handlers hs)
+                     (reify conn/Transport
+                       (send-text [_ s] (swap! sent conj s) true)
+                       (close! [_ _ _] :closed))))]
+     {:factory factory
+      :calls calls
+      :sent sent
+      :open (fn [] ((:on-open @handlers)))
+      :close (fn [c r] ((:on-close @handlers) c r))})))
+
+(defn- wait-for
+  "Polls `pred` every 10ms up to `timeout-ms`. Returns last pred value."
+  [pred timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (let [v (pred)]
+        (if (or v (> (System/currentTimeMillis) deadline))
+          v
+          (do (Thread/sleep 10) (recur)))))))
+
+(deftest unexpected-close-reconnects-and-rejoins
+  (let [rt (counting-transports)
+        conn (conn/connect test-client
+                           {:transport-factory (:factory rt)
+                            :heartbeat-ms 60000
+                            :reconnect-after-ms (constantly 5)
+                            :on-error (fn [_] nil)})]
+    (try
+      ((:open rt))
+      ;; join a channel
+      (conn/upsert-channel! conn "realtime:r" {:private false})
+      (conn/update-channel! conn "realtime:r" assoc :state :joining :join-ref "1")
+      (conn/dispatch-frame conn {:topic "realtime:r"
+                                 :event "phx_reply"
+                                 :ref "1"
+                                 :payload {:status "ok"
+                                           :response {:postgres_changes []}}})
+      (is (= :joined (:state (conn/channel-state conn "realtime:r"))))
+      ;; socket drops
+      (let [sent-before (count @(:sent rt))]
+        ((:close rt) 1006 "abnormal")
+        (is (wait-for #(= 2 @(:calls rt)) 2000))
+        (is (contains? #{:reconnecting :connecting} (:status @(:state conn))))
+        ;; new socket opens — channel rejoins with a fresh phx_join
+        ((:open rt))
+        (is (= :open (:status @(:state conn))))
+        (is (= :joining (:state (conn/channel-state conn "realtime:r"))))
+        (is (> (count @(:sent rt)) sent-before))
+        (let [rejoin (proto/parse-frame (last @(:sent rt)))]
+          (is (= "phx_join" (:event rejoin)))
+          (is (= "realtime:r" (:topic rejoin)))))
+      (finally (conn/disconnect conn)))))
+
+(deftest reconnect-gives-up-after-max-attempts
+  (let [rt (counting-transports {:fail-after 1})
+        errs (atom [])
+        conn (conn/connect test-client
+                           {:transport-factory (:factory rt)
+                            :heartbeat-ms 60000
+                            :reconnect-after-ms (constantly 1)
+                            :max-reconnect-attempts 2
+                            :on-error #(swap! errs conj %)})]
+    (try
+      ((:open rt))
+      ((:close rt) 1006 "abnormal")
+      (is (wait-for #(= :errored (:status @(:state conn))) 3000))
+      (is (some #(= :reconnect-exhausted (:supabase/code %)) @errs))
+      (finally (conn/disconnect conn)))))
+
+(deftest disconnect-does-not-reconnect
+  (let [rt (counting-transports)
+        conn (conn/connect test-client
+                           {:transport-factory (:factory rt)
+                            :heartbeat-ms 60000
+                            :reconnect-after-ms (constantly 1)
+                            :on-error (fn [_] nil)})]
+    ((:open rt))
+    (conn/disconnect conn)
+    (Thread/sleep 100)
+    (is (= 1 @(:calls rt)))
+    (is (= :closed (:status @(:state conn))))))
