@@ -9,7 +9,8 @@
 (def BroadcastConfig
   (m/schema [:map
              {:closed true}
-             [:self {:optional true} :boolean]]))
+             [:self {:optional true} :boolean]
+             [:ack {:optional true} :boolean]]))
 
 (def PresenceConfig
   (m/schema [:map

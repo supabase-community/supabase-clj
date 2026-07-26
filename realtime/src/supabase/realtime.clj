@@ -179,6 +179,58 @@
         frame (proto/broadcast-frame ref (:join-ref cs) topic event payload)]
     (push-or-buffer! ch frame)))
 
+;; ---------------------------------------------------------------------------
+;; Broadcast acks
+;; ---------------------------------------------------------------------------
+
+(defn- new-ack-ref []
+  (str "ack:" (random-uuid)))
+
+(defn broadcast-with-ack
+  "Sends a broadcast and returns the ack-ref (string) identifying it. The
+  server replies with a `phx_reply` carrying that ref once the broadcast is
+  accepted — requires `:config {:broadcast {:ack true}}` on the channel.
+
+      (let [ack (rt/broadcast-with-ack ch \"typing\" {:user \"a\"})]
+        (rt/wait-for-ack ch ack {:timeout-ms 3000}))
+
+  Buffered like `broadcast` until the channel joins."
+  [ch event payload]
+  (let [c (channel-conn ch)
+        topic (:topic ch)
+        cs (conn/channel-state c topic)
+        ack-ref (new-ack-ref)
+        p (promise)
+        frame (proto/broadcast-frame ack-ref (:join-ref cs) topic event payload)]
+    (conn/update-channel! c topic assoc-in [:pending-acks ack-ref] p)
+    (push-or-buffer! ch frame)
+    ack-ref))
+
+(defn wait-for-ack
+  "Blocks up to `timeout-ms` (default 5000) for the server ack of `ack-ref`
+  from `broadcast-with-ack`. Returns `:acknowledged`, or an anomaly:
+  `:ack-timeout` when the wait expires, `:ack-not-found` for an unknown ref."
+  ([ch ack-ref] (wait-for-ack ch ack-ref {}))
+  ([ch ack-ref {:keys [timeout-ms] :or {timeout-ms 5000}}]
+   (let [c (channel-conn ch)
+         topic (:topic ch)
+         p (get-in @(:state c) [:channels topic :pending-acks ack-ref])]
+     (if-not p
+       (error/anomaly :cognitect.anomalies/not-found
+                      {:cognitect.anomalies/message "Unknown ack-ref"
+                       :supabase/service :realtime
+                       :supabase/code :ack-not-found
+                       :realtime/ack-ref ack-ref})
+       (let [v (deref p timeout-ms ::timeout)]
+         (conn/update-channel! c topic update :pending-acks dissoc ack-ref)
+         (if (= ::timeout v)
+           (error/anomaly :cognitect.anomalies/busy
+                          {:cognitect.anomalies/message "Broadcast ack timed out"
+                           :supabase/service :realtime
+                           :supabase/code :ack-timeout
+                           :realtime/ack-ref ack-ref})
+           :acknowledged))))))
+
 (defn track
   "Sends a presence `track` message with `state`. Returns `ch`."
   [ch state]
