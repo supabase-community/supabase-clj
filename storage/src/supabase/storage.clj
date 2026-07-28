@@ -3,7 +3,8 @@
 
   Provides bucket CRUD plus per-bucket file operations (list, remove, move,
   copy, info, exists?, public/signed URLs, upload, download). Per-bucket
-  ops take a storage instance returned by `from`.
+  ops take a storage instance returned by `from`. Vector bucket, index, and
+  vector data operations live in `supabase.storage.vector`.
 
   ## Example
 
@@ -106,7 +107,7 @@
   [resp]
   (and (map? resp) (integer? (:status resp)) (< (:status resp) 400)))
 
-(defn- storage-error-parser
+(defn storage-error-parser
   "Maps a Storage error response to an anomaly, preferring the API's
   `message` field for the human-readable text. Wired via
   `http/with-error-parser`."
@@ -116,7 +117,7 @@
       (assoc base :cognitect.anomalies/message msg)
       base)))
 
-(defn- with-storage-errors
+(defn with-storage-errors
   "Installs the Storage error parser on a request."
   [req]
   (http/with-error-parser req storage-error-parser))
