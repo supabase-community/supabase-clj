@@ -30,6 +30,20 @@
              {:closed true}
              [:config {:optional true} #'ChannelConfig]]))
 
+(def ConnectOpts
+  "Schema for the options map passed to `connect`."
+  (m/schema [:map
+             {:closed true}
+             [:on-error {:optional true} [:fn fn?]]
+             [:heartbeat-ms {:optional true} :int]
+             [:params {:optional true} :map]
+             [:transport-factory {:optional true} [:fn fn?]]
+             [:auto-reconnect? {:optional true} :boolean]
+             [:reconnect-after-ms {:optional true} [:fn fn?]]
+             [:max-reconnect-attempts {:optional true} :int]
+             [:access-token-fn {:optional true} [:fn fn?]]
+             [:http-fallback? {:optional true} :boolean]]))
+
 (def PostgresEvent
   (m/schema [:enum :insert :update :delete :all "*"]))
 
