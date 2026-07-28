@@ -44,6 +44,7 @@
     - `supabase.postgrest.filters`  — eq / gt / like / contains / and / or / not / ...
     - `supabase.postgrest.query`    — select / embed / insert / upsert / update / delete / rpc / aggregations
     - `supabase.postgrest.transform`— order / limit / range / single / csv / explain / returning / ...
+    - `supabase.postgrest.rls`      — with-access-token / with-jwt-claim / with-jwt-claims
     - `supabase.postgrest.encode`   — pg-array / pg-range / pg-bool / ->iso (type coercion helpers)"
   (:refer-clojure :exclude [count filter min max range update])
   (:require [supabase.core.client :as client]
@@ -52,6 +53,7 @@
             [supabase.postgrest.error :as pg-error]
             [supabase.postgrest.filters :as filters]
             [supabase.postgrest.query :as query]
+            [supabase.postgrest.rls :as rls]
             [supabase.postgrest.transform :as transform])
   (:import (java.util.concurrent CancellationException CompletableFuture)))
 
@@ -184,3 +186,8 @@
 (def explain      transform/explain)
 (def rollback     transform/rollback)
 (def returning    transform/returning)
+
+;; RLS headers
+(def with-access-token rls/with-access-token)
+(def with-jwt-claim    rls/with-jwt-claim)
+(def with-jwt-claims   rls/with-jwt-claims)
