@@ -33,7 +33,7 @@
        manual `set-auth`, heartbeat, multi-channel per connection.
 
   Out (deferred): broadcast ack/wait_for_ack, HTTP fallback,
-       binary v2 protocol, auto token refresh."
+       binary v2 protocol."
   (:require [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.realtime.connection :as conn]
@@ -50,6 +50,7 @@
   ([client] (connect client {}))
   ([client opts]
    (or (client/ensure-client client)
+       (specs/ensure-valid specs/ConnectOpts opts)
        (conn/connect client opts))))
 
 (defn disconnect
@@ -137,7 +138,7 @@
         topic (:topic ch)
         cs (conn/channel-state c topic)
         ref (new-ref ch)
-        token (or (:access-token (:client c)) (:api-key (:client c)))
+        token (conn/resolve-token c)
         frame (proto/join-frame ref topic (:config cs) (:bindings cs) token)]
     (conn/update-channel! c topic assoc :state :joining :join-ref ref)
     (conn/enqueue! c frame)

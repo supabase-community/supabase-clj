@@ -48,6 +48,9 @@
       (is (some? (:transport @(:state conn))))
       (is (some? (:state conn))))))
 
+(deftest connect-rejects-invalid-opts
+  (is (error/anomaly? (rt/connect test-client {:bogus 1}))))
+
 ;; ---------------------------------------------------------------------------
 ;; channel construction
 ;; ---------------------------------------------------------------------------
@@ -104,6 +107,18 @@
         (is (= "realtime:r" (:topic f)))
         (is (= 1 (count (get-in f [:payload :config :postgres_changes]))))
         (is (= "anon-key" (get-in f [:payload :access_token])))))))
+
+(deftest subscribe-uses-access-token-fn-in-join-frame
+  (let [rt (recording-transport)
+        conn (rt/connect test-client {:transport-factory (:factory rt)
+                                      :heartbeat-ms 60000
+                                      :access-token-fn (constantly "fn-token")})]
+    (try
+      ((:open rt))
+      (let [ch (rt/channel conn "r")]
+        (rt/subscribe ch))
+      (is (= "fn-token" (get-in (last-sent-frame rt) [:payload :access_token])))
+      (finally (rt/disconnect conn)))))
 
 ;; ---------------------------------------------------------------------------
 ;; broadcast send + buffering
