@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.1.0...postgrest-v1.2.0) (2026-07-28)
+
+
+### Features
+
+* **postgrest:** rls header helpers ([#33](https://github.com/supabase-community/supabase-clj/issues/33)) ([eff75e2](https://github.com/supabase-community/supabase-clj/commit/eff75e2b1b3c6a4c221181be7cb83d24be94dc96))
+
 ## [1.1.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.0.0...postgrest-v1.1.0) (2026-06-20)
 
 
