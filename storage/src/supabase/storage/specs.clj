@@ -167,6 +167,18 @@
                     :supabase/service :storage})))
 
 ;; ---------------------------------------------------------------------------
+;; Analytics buckets
+;; ---------------------------------------------------------------------------
+
+(def ListAnalyticsBucketsOpts
+  "Schema for analytics list-buckets options. All fields optional."
+  (m/schema [:map
+             {:closed true}
+             [:limit {:optional true} :int]
+             [:offset {:optional true} :int]
+             [:sort-column {:optional true} [:enum :name :created-at :updated-at]]
+             [:sort-order {:optional true} [:enum :asc :desc]]
+             [:search {:optional true} :string]]))
 ;; Vector buckets
 ;; ---------------------------------------------------------------------------
 

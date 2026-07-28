@@ -3,6 +3,8 @@
 
   Provides bucket CRUD plus per-bucket file operations (list, remove, move,
   copy, info, exists?, public/signed URLs, upload, download). Per-bucket
+  ops take a storage instance returned by `from`. Analytics bucket
+  operations live in `supabase.storage.analytics`.
   ops take a storage instance returned by `from`. Vector bucket, index, and
   vector data operations live in `supabase.storage.vector`.
 
