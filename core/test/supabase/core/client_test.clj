@@ -168,3 +168,17 @@
     (let [result (client/update-access-token {:not "a client"} "token")]
       (is (error/anomaly? result))
       (is (= :cognitect.anomalies/incorrect (:cognitect.anomalies/category result))))))
+
+;; ---------------------------------------------------------------------------
+;; ensure-client
+;; ---------------------------------------------------------------------------
+
+(deftest ensure-client-test
+  (testing "returns nil for a valid client"
+    (is (nil? (client/ensure-client (client/make-client base-url api-key)))))
+
+  (testing "returns a :core-tagged anomaly for an invalid client"
+    (let [result (client/ensure-client {:not "a client"})]
+      (is (error/anomaly? result))
+      (is (= :cognitect.anomalies/incorrect (:cognitect.anomalies/category result)))
+      (is (= :core (:supabase/service result))))))

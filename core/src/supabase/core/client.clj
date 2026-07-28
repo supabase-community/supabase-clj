@@ -261,4 +261,4 @@
   (when-not (m/validate Client client)
     (error/anomaly :cognitect.anomalies/incorrect
                    {:cognitect.anomalies/message "Invalid client map"
-                    :supabase/service :auth})))
+                    :supabase/service :core})))
