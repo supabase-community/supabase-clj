@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.3.0...storage-v0.4.0) (2026-07-28)
+
+
+### Features
+
+* **storage:** analytics buckets ([#36](https://github.com/supabase-community/supabase-clj/issues/36)) ([81c0d98](https://github.com/supabase-community/supabase-clj/commit/81c0d9884ccef57779f4e28bb07d8adafb0768a6))
+
 ## [0.3.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.2.0...storage-v0.3.0) (2026-07-28)
 
 
