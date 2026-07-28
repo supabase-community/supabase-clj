@@ -32,8 +32,8 @@
   In:  postgres_changes, broadcast send/receive, basic presence,
        manual `set-auth`, heartbeat, multi-channel per connection.
 
-  Out (deferred): broadcast ack/wait_for_ack,
-       binary v2 protocol, auto token refresh."
+  Out (deferred): broadcast ack/wait_for_ack, HTTP fallback,
+       binary v2 protocol."
   (:require [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.core.http :as http]
@@ -139,7 +139,7 @@
         topic (:topic ch)
         cs (conn/channel-state c topic)
         ref (new-ref ch)
-        token (or (:access-token (:client c)) (:api-key (:client c)))
+        token (conn/resolve-token c)
         frame (proto/join-frame ref topic (:config cs) (:bindings cs) token)]
     (conn/update-channel! c topic assoc :state :joining :join-ref ref)
     (conn/enqueue! c frame)

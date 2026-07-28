@@ -41,6 +41,7 @@
              [:auto-reconnect? {:optional true} :boolean]
              [:reconnect-after-ms {:optional true} [:fn fn?]]
              [:max-reconnect-attempts {:optional true} :int]
+             [:access-token-fn {:optional true} [:fn fn?]]
              [:http-fallback? {:optional true} :boolean]]))
 
 (def PostgresEvent
