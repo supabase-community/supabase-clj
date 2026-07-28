@@ -44,7 +44,7 @@
             [supabase.core.transport :as transport]))
 
 ;; x-release-please-start-version
-(def ^:private version "0.6.0")
+(def ^:private version "0.6.1")
 ;; x-release-please-end
 
 ;; ---------------------------------------------------------------------------
