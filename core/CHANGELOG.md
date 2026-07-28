@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/supabase-community/supabase-clj/compare/core-v0.6.0...core-v0.6.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **core:** tag ensure-client anomaly with :core service ([#38](https://github.com/supabase-community/supabase-clj/issues/38)) ([5ea7f13](https://github.com/supabase-community/supabase-clj/commit/5ea7f13856db58005467beb868b22c065462deb9))
+
 ## [0.6.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.5.0...core-v0.6.0) (2026-06-20)
 
 
