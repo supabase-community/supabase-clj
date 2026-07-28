@@ -179,3 +179,113 @@
              [:sort-column {:optional true} [:enum :name :created-at :updated-at]]
              [:sort-order {:optional true} [:enum :asc :desc]]
              [:search {:optional true} :string]]))
+;; Vector buckets
+;; ---------------------------------------------------------------------------
+
+(def VectorStorage
+  "Schema for a vector storage instance map produced by
+  `supabase.storage.vector/from` and `supabase.storage.vector/index`.
+  `:vector-bucket-name` is required by index operations and
+  `:vector-index-name` additionally by vector data operations."
+  (m/schema [:map
+             {:closed true}
+             [:client #'client/Client]
+             [:vector-bucket-name {:optional true} :string]
+             [:vector-index-name {:optional true} :string]]))
+
+(def ListVectorBucketsOpts
+  "Schema for vector list-buckets options. All fields optional."
+  (m/schema [:map
+             {:closed true}
+             [:prefix {:optional true} :string]
+             [:max-results {:optional true} :int]
+             [:next-token {:optional true} :string]]))
+
+(def ListIndexesOpts
+  "Schema for vector list-indexes options. Same shape as
+  `ListVectorBucketsOpts`."
+  ListVectorBucketsOpts)
+
+(def ^:private MetadataConfiguration
+  (m/schema [:map
+             {:closed true}
+             [:non-filterable-metadata-keys {:optional true}
+              [:vector :string]]]))
+
+(def CreateIndexParams
+  "Schema for vector create-index params. `vector-bucket-name` comes from
+  the instance and is not part of this map."
+  (m/schema [:map
+             {:closed true}
+             [:index-name :string]
+             [:data-type [:enum :float32]]
+             [:dimension [:int {:min 1}]]
+             [:distance-metric [:enum :cosine :euclidean :dotproduct]]
+             [:metadata-configuration {:optional true}
+              #'MetadataConfiguration]]))
+
+(def ^:private VectorData
+  (m/schema [:map
+             {:closed true}
+             [:float32 [:vector number?]]]))
+
+(def ^:private VectorEntry
+  (m/schema [:map
+             {:closed true}
+             [:key :string]
+             [:data #'VectorData]
+             [:metadata {:optional true} :map]]))
+
+(def VectorBatch
+  "Schema for put-vectors input: 1-500 API-shaped vector entries."
+  (m/schema [:vector {:min 1 :max 500} #'VectorEntry]))
+
+(def VectorKeys
+  "Schema for delete-vectors input: 1-500 vector keys."
+  (m/schema [:vector {:min 1 :max 500} :string]))
+
+(def GetVectorsOpts
+  "Schema for get-vectors options. `keys` is required."
+  (m/schema [:map
+             {:closed true}
+             [:keys [:vector {:min 1} :string]]
+             [:return-data {:optional true} :boolean]
+             [:return-metadata {:optional true} :boolean]]))
+
+(def ListVectorsOpts
+  "Schema for list-vectors options. All fields optional; when both
+  `:segment-count` and `:segment-index` are given, the index must be
+  within `[0, segment-count)`."
+  (m/schema [:and
+             [:map
+              {:closed true}
+              [:max-results {:optional true} :int]
+              [:next-token {:optional true} :string]
+              [:return-data {:optional true} :boolean]
+              [:return-metadata {:optional true} :boolean]
+              [:segment-count {:optional true} [:int {:min 1 :max 16}]]
+              [:segment-index {:optional true} [:int {:min 0}]]]
+             [:fn {:error/message "segment-index must be between 0 and segment-count - 1"}
+              (fn [{:keys [segment-count segment-index]}]
+                (or (nil? segment-count)
+                    (nil? segment-index)
+                    (< segment-index segment-count)))]]))
+
+(def QueryVectorsQuery
+  "Schema for query-vectors input. `:query-vector` is required."
+  (m/schema [:map
+             {:closed true}
+             [:query-vector #'VectorData]
+             [:top-k {:optional true} :int]
+             [:filter {:optional true} :map]
+             [:return-distance {:optional true} :boolean]
+             [:return-metadata {:optional true} :boolean]]))
+
+(defn ensure-vector-storage
+  "Returns nil if `v` is a valid vector storage instance, otherwise an
+  anomaly."
+  [v]
+  (when-not (m/validate VectorStorage v)
+    (error/anomaly :cognitect.anomalies/incorrect
+                   {:cognitect.anomalies/message "Invalid vector storage instance"
+                    :supabase/service :storage})))

@@ -341,3 +341,84 @@
     (Thread/sleep 100)
     (is (= 1 @(:calls rt)))
     (is (= :closed (:status @(:state conn))))))
+
+;; ---------------------------------------------------------------------------
+;; access-token-fn
+;; ---------------------------------------------------------------------------
+
+(defn- header-recording-transport
+  "Like `recording-transport` but captures the upgrade headers of every
+  factory call into `:headers` (one entry per dial attempt)."
+  []
+  (let [sent (atom [])
+        header-calls (atom [])
+        handlers (atom nil)
+        factory (fn [_url upgrade-headers hs]
+                  (swap! header-calls conj upgrade-headers)
+                  (reset! handlers hs)
+                  (reify conn/Transport
+                    (send-text [_ s] (swap! sent conj s) true)
+                    (close! [_ _ _] :closed)))]
+    {:factory factory
+     :sent sent
+     :headers header-calls
+     :open (fn [] ((:on-open @handlers)))
+     :close (fn [c r] ((:on-close @handlers) c r))}))
+
+(deftest connect-uses-access-token-fn-in-upgrade-headers
+  (let [rt (header-recording-transport)
+        conn (conn/connect test-client
+                           {:transport-factory (:factory rt)
+                            :heartbeat-ms 60000
+                            :access-token-fn (constantly "fn-token")
+                            :on-error (fn [_] nil)})]
+    (try
+      (is (= "Bearer fn-token" (get (first @(:headers rt)) "Authorization")))
+      (finally (conn/disconnect conn)))))
+
+(deftest access-token-fn-failure-falls-back-to-client-token
+  (doseq [bad-fn [(fn [] (throw (ex-info "boom" {})))
+                  (fn [] {:cognitect.anomalies/category :cognitect.anomalies/fault})
+                  (fn [] nil)]]
+    (let [rt (header-recording-transport)
+          conn (conn/connect test-client
+                             {:transport-factory (:factory rt)
+                              :heartbeat-ms 60000
+                              :access-token-fn bad-fn
+                              :on-error (fn [_] nil)})]
+      (try
+        (is (= "Bearer anon-key" (get (first @(:headers rt)) "Authorization")))
+        (finally (conn/disconnect conn))))))
+
+(deftest reconnect-re-resolves-access-token
+  (let [calls (atom 0)
+        token-fn (fn [] (str "tok-" (swap! calls inc)))
+        rt (header-recording-transport)
+        conn (conn/connect test-client
+                           {:transport-factory (:factory rt)
+                            :heartbeat-ms 60000
+                            :reconnect-after-ms (constantly 5)
+                            :access-token-fn token-fn
+                            :on-error (fn [_] nil)})]
+    (try
+      ;; initial dial resolves the first token
+      (is (= "Bearer tok-1" (get (nth @(:headers rt) 0) "Authorization")))
+      ((:open rt))
+      ;; join a channel so the reconnect triggers a rejoin
+      (conn/upsert-channel! conn "realtime:r" {:private false})
+      (conn/update-channel! conn "realtime:r" assoc :state :joining :join-ref "1")
+      (conn/dispatch-frame conn {:topic "realtime:r"
+                                 :event "phx_reply"
+                                 :ref "1"
+                                 :payload {:status "ok"
+                                           :response {:postgres_changes []}}})
+      ;; socket drops — the reconnect attempt re-resolves the token
+      ((:close rt) 1006 "abnormal")
+      (is (wait-for #(= 2 (count @(:headers rt))) 2000))
+      (is (= "Bearer tok-2" (get (nth @(:headers rt) 1) "Authorization")))
+      ;; rejoin resolves again (tok-3) for the phx_join payload
+      ((:open rt))
+      (let [rejoin (proto/parse-frame (last @(:sent rt)))]
+        (is (= "phx_join" (:event rejoin)))
+        (is (= "tok-3" (get-in rejoin [:payload :access_token]))))
+      (finally (conn/disconnect conn)))))

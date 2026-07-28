@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.2.0...storage-v0.3.0) (2026-07-28)
+
+
+### Features
+
+* **storage:** vector buckets ([#32](https://github.com/supabase-community/supabase-clj/issues/32)) ([bf348dc](https://github.com/supabase-community/supabase-clj/commit/bf348dcc695994f7327b43d9015d2ce661658ff0))
+
 ## [0.2.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.1.0...storage-v0.2.0) (2026-06-20)
 
 

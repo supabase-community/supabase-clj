@@ -3,9 +3,11 @@
             [clojure.test :refer [deftest is testing]]
             [supabase.core.client :as client]
             [supabase.core.error :as error]
+            [supabase.core.transport :as transport]
             [supabase.realtime :as rt]
             [supabase.realtime.connection :as conn]
-            [supabase.realtime.protocol :as proto]))
+            [supabase.realtime.protocol :as proto])
+  (:import (java.util.concurrent CompletableFuture)))
 
 (def test-client (client/make-client "https://abc.supabase.co" "anon-key"))
 
@@ -47,6 +49,9 @@
       (is (map? conn))
       (is (some? (:transport @(:state conn))))
       (is (some? (:state conn))))))
+
+(deftest connect-rejects-invalid-opts
+  (is (error/anomaly? (rt/connect test-client {:bogus 1}))))
 
 ;; ---------------------------------------------------------------------------
 ;; channel construction
@@ -105,6 +110,18 @@
         (is (= 1 (count (get-in f [:payload :config :postgres_changes]))))
         (is (= "anon-key" (get-in f [:payload :access_token])))))))
 
+(deftest subscribe-uses-access-token-fn-in-join-frame
+  (let [rt (recording-transport)
+        conn (rt/connect test-client {:transport-factory (:factory rt)
+                                      :heartbeat-ms 60000
+                                      :access-token-fn (constantly "fn-token")})]
+    (try
+      ((:open rt))
+      (let [ch (rt/channel conn "r")]
+        (rt/subscribe ch))
+      (is (= "fn-token" (get-in (last-sent-frame rt) [:payload :access_token])))
+      (finally (rt/disconnect conn)))))
+
 ;; ---------------------------------------------------------------------------
 ;; broadcast send + buffering
 ;; ---------------------------------------------------------------------------
@@ -129,6 +146,81 @@
         (let [f (last-sent-frame rt)]
           (is (= "broadcast" (:event f)))
           (is (= "ping" (get-in f [:payload :event]))))))))
+
+;; ---------------------------------------------------------------------------
+;; HTTP broadcast fallback
+;; ---------------------------------------------------------------------------
+
+(defn stub-transport
+  "Captures the last HTTP request and returns the supplied response."
+  [response]
+  (let [captured (atom nil)
+        t (reify transport/Transport
+            (execute [_ req]
+              (reset! captured req)
+              response)
+            (execute-async [_ req]
+              (reset! captured req)
+              (CompletableFuture/completedFuture response)))]
+    [captured t]))
+
+(defn- with-http-conn
+  "Connects with the recording WS transport plus a stub HTTP transport.
+  The socket is never opened, so status stays `:connecting`. `f` receives
+  [conn rt captured-http-req]."
+  [extra-opts f]
+  (let [[captured t] (stub-transport {:status 200 :body "{}" :headers {}})
+        c (assoc test-client :transport t)
+        rt (recording-transport)
+        conn (rt/connect c (merge {:transport-factory (:factory rt)
+                                   :heartbeat-ms 60000}
+                                  extra-opts))]
+    (try (f conn rt captured)
+         (finally (rt/disconnect conn)))))
+
+(deftest broadcast-falls-back-to-http-when-down-and-opted-in
+  (with-http-conn {:http-fallback? true}
+    (fn [conn rt captured]
+      (let [ch (rt/channel conn "r")
+            res (rt/broadcast ch "ping" {:n 1})]
+        (is (= ch res))
+        ;; nothing went over the socket or into the push buffer
+        (is (empty? @(:sent rt)))
+        (is (empty? (:push-buf (conn/channel-state conn "realtime:r"))))
+        (is (= :post (:method @captured)))
+        (is (= "https://abc.supabase.co/realtime/v1/api/broadcast" (:url @captured)))
+        (is (= "Bearer anon-key" (get-in @captured [:headers "authorization"])))
+        (is (= {:messages [{:topic "realtime:r" :event "ping" :payload {:n 1}}]}
+               (proto/parse-frame (:body @captured))))))))
+
+(deftest broadcast-buffers-when-fallback-not-enabled
+  (with-http-conn {}
+    (fn [conn _ captured]
+      (let [ch (rt/channel conn "r")]
+        (rt/broadcast ch "ping" {:n 1})
+        (is (nil? @captured))
+        (is (= 1 (count (:push-buf (conn/channel-state conn "realtime:r")))))))))
+
+(deftest broadcast-with-ack-never-falls-back
+  (with-http-conn {:http-fallback? true}
+    (fn [conn _ captured]
+      (let [ch (rt/channel conn "r" {:config {:broadcast {:ack true}}})]
+        (rt/broadcast-with-ack ch "ping" {:n 1})
+        (is (nil? @captured))
+        (is (= 1 (count (:push-buf (conn/channel-state conn "realtime:r")))))))))
+
+(deftest broadcast-fallback-returns-anomaly-on-http-failure
+  (let [[_ t] (stub-transport {:status 500 :body "{\"error\":\"boom\"}" :headers {}})
+        c (assoc test-client :transport t)
+        rt (recording-transport)
+        conn (rt/connect c {:transport-factory (:factory rt)
+                            :heartbeat-ms 60000
+                            :http-fallback? true})]
+    (try
+      (let [ch (rt/channel conn "r")
+            res (rt/broadcast ch "ping" {})]
+        (is (error/anomaly? res)))
+      (finally (rt/disconnect conn)))))
 
 ;; ---------------------------------------------------------------------------
 ;; postgres_changes end-to-end via api

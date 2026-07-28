@@ -495,3 +495,32 @@
         fut (pg/execute-async (-> (pg/from c "t") (pg/select "*")))]
     (is (true? (future-cancel fut)))
     (is (true? (.isCancelled raw)) "cancellation reaches the in-flight request")))
+
+;; ---------------------------------------------------------------------------
+;; rls headers
+;; ---------------------------------------------------------------------------
+
+(deftest with-access-token-overrides-authorization
+  (let [[_ req] (run-with-capture
+                 #(-> (pg/from test-client "documents")
+                      (pg/select "*")
+                      (pg/with-access-token "user-jwt")
+                      (pg/execute)))]
+    (is (= "Bearer user-jwt" (get-in req [:headers "authorization"])))))
+
+(deftest with-jwt-claim-sets-single-header
+  (let [req (-> (pg/from test-client "documents")
+                (pg/select "*")
+                (pg/with-jwt-claim :tenant "t1"))]
+    (is (= "t1" (get-in req [:headers "x-jwt-tenant"])))))
+
+(deftest with-jwt-claims-merge-and-stringify
+  (let [req (-> (pg/from test-client "documents")
+                (pg/select "*")
+                (pg/with-jwt-claims {:tenant "t1" "role" :admin :level 3}))]
+    (is (= "t1" (get-in req [:headers "x-jwt-tenant"])))
+    (is (= ":admin" (get-in req [:headers "x-jwt-role"]))
+        "values are stringified via `str`")
+    (is (= "3" (get-in req [:headers "x-jwt-level"])))
+    (is (= "count=exact" (get-in req [:headers "prefer"]))
+        "unrelated headers already on the request are preserved")))

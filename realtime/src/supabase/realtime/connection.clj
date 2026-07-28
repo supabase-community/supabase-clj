@@ -25,7 +25,7 @@
     "Initiates an orderly close of the underlying connection."))
 
 ;; ---------------------------------------------------------------------------
-;; URL + headers
+;; URL
 ;; ---------------------------------------------------------------------------
 
 (defn- http->ws [url]
@@ -45,10 +45,34 @@
                  (str/join "&"))]
      (str base "?" qs))))
 
-(defn- upgrade-headers [client]
-  (let [token (or (:access-token client) (:api-key client))]
-    {"Authorization" (str "Bearer " token)
-     "X-Client-Info" (str "supabase-realtime-clj/0.1.0")}))
+;; ---------------------------------------------------------------------------
+;; Token resolution + headers
+;; ---------------------------------------------------------------------------
+
+(defn- resolve-token*
+  "Calls `access-token-fn` (guarding exceptions); a string result wins,
+  otherwise falls back to the client's `:access-token` then `:api-key`."
+  [client access-token-fn]
+  (or (when access-token-fn
+        (try (let [v (access-token-fn)]
+               (when (string? v) v))
+             (catch Throwable _ nil)))
+      (:access-token client)
+      (:api-key client)))
+
+(defn resolve-token
+  "Resolves the bearer token for `conn`: the `:access-token-fn` result when
+  supplied and successful, falling back to the client token on exception or
+  non-string result."
+  [conn]
+  (resolve-token* (:client conn) (:access-token-fn conn)))
+
+(defn- upgrade-headers
+  "Builds WS upgrade headers for `conn`. Called per dial attempt so a
+  refreshed `:access-token-fn` result is picked up on reconnect."
+  [conn]
+  {"Authorization" (str "Bearer " (resolve-token conn))
+   "X-Client-Info" "supabase-realtime-clj/0.1.0"})
 
 ;; ---------------------------------------------------------------------------
 ;; hato Transport impl
@@ -428,25 +452,27 @@
   "Re-subscribes every channel that was joined before the drop (non-nil
   `:join-ref`, not leaving): fresh `phx_join` with stored config + bindings."
   [conn]
-  (let [client (:client conn)
-        token (or (:access-token client) (:api-key client))
-        channels (:channels @(:state conn))]
-    (doseq [[topic cs] channels
-            :when (and (:join-ref cs) (#{:idle :errored} (:state cs)))]
-      (let [ref (new-ref (:state conn))
-            frame (proto/join-frame ref topic (:config cs) (:bindings cs) token)]
-        (update-channel! conn topic assoc :state :joining :join-ref ref)
-        (enqueue! conn frame)))))
+  (let [to-rejoin (filter (fn [[_ cs]]
+                            (and (:join-ref cs) (#{:idle :errored} (:state cs))))
+                          (:channels @(:state conn)))]
+    (when (seq to-rejoin)
+      (let [token (resolve-token conn)]
+        (doseq [[topic cs] to-rejoin]
+          (let [ref (new-ref (:state conn))
+                frame (proto/join-frame ref topic (:config cs) (:bindings cs) token)]
+            (update-channel! conn topic assoc :state :joining :join-ref ref)
+            (enqueue! conn frame)))))))
 
 (declare schedule-reconnect!)
 
 (defn- attempt-reconnect!
-  "Opens a fresh transport via the stored factory. Failure reschedules."
+  "Opens a fresh transport via the stored factory. Failure reschedules.
+  Upgrade headers are rebuilt per attempt so a refreshed token is used."
   [conn]
   (when-not (:closing? @(:state conn))
     (swap! (:state conn) update :reconnect-attempts inc)
     (try
-      (let [t ((:transport-factory conn) (:url conn) (:headers conn) (:handlers conn))]
+      (let [t ((:transport-factory conn) (:url conn) (upgrade-headers conn) (:handlers conn))]
         (swap! (:state conn) assoc :transport t :status :connecting))
       (catch Throwable t
         (when-let [f (:on-error conn)]
@@ -530,18 +556,29 @@
     - `:reconnect-after-ms`     — `(fn [tries])` → delay before attempt `tries`.
                                   Defaults to `default-reconnect-after-ms`.
     - `:max-reconnect-attempts` — give up after N attempts (default: never)
+    - `:access-token-fn`        — zero-arity fn returning a token string.
+                                  Called for the initial upgrade and re-resolved
+                                  at every reconnect and channel (re)join, so a
+                                  refreshed token is picked up. On exception or
+                                  non-string result, falls back to the client's
+                                  `:access-token` then `:api-key`.
+    - `:http-fallback?`         — send plain broadcasts over HTTP POST when the
+                                  socket is not `:open` (default false). See
+                                  `supabase.realtime/broadcast`.
 
   Returns a connection map, or an anomaly on failure."
   ([client] (connect client {}))
   ([client opts]
    (let [{:keys [on-error heartbeat-ms params transport-factory
-                 auto-reconnect? reconnect-after-ms max-reconnect-attempts]
+                 auto-reconnect? reconnect-after-ms max-reconnect-attempts
+                 access-token-fn
+                 http-fallback?]
           :or   {heartbeat-ms 30000
                  transport-factory ws-transport
                  auto-reconnect? true
-                 reconnect-after-ms default-reconnect-after-ms}} opts
+                 reconnect-after-ms default-reconnect-after-ms
+                 http-fallback? false}} opts
          url (build-ws-url client (or params {}))
-         headers (upgrade-headers client)
          state (atom (initial-state))
          conn-promise (atom nil)
          handlers {:on-open  (on-open-handler conn-promise)
@@ -558,17 +595,18 @@
                              (doto (Thread. r "supabase-realtime-reconnect")
                                (.setDaemon true)))))]
      (try
-       (let [t (transport-factory url headers handlers)
-             conn {:client    client
+       (let [conn {:client    client
                    :state     state
                    :on-error  on-error
                    :url       url
-                   :headers   headers
                    :handlers  handlers
                    :transport-factory transport-factory
                    :reconnect-after-ms reconnect-after-ms
                    :max-reconnect-attempts max-reconnect-attempts
+                   :access-token-fn access-token-fn
+                   :http-fallback? http-fallback?
                    :reconnect-exec reconnect-exec}
+             t (transport-factory url (upgrade-headers conn) handlers)
              _ (swap! state assoc :transport t)
              heartbeat (start-heartbeat! conn heartbeat-ms)
              conn (assoc conn :heartbeat heartbeat)]
