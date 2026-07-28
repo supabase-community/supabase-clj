@@ -72,7 +72,7 @@
   refreshed `:access-token-fn` result is picked up on reconnect."
   [conn]
   {"Authorization" (str "Bearer " (resolve-token conn))
-   "X-Client-Info" (str "supabase-realtime-clj/0.1.0")})
+   "X-Client-Info" "supabase-realtime-clj/0.1.0"})
 
 ;; ---------------------------------------------------------------------------
 ;; hato Transport impl
@@ -571,7 +571,7 @@
   ([client opts]
    (let [{:keys [on-error heartbeat-ms params transport-factory
                  auto-reconnect? reconnect-after-ms max-reconnect-attempts
-                 access-token-fn]
+                 access-token-fn
                  http-fallback?]
           :or   {heartbeat-ms 30000
                  transport-factory ws-transport
