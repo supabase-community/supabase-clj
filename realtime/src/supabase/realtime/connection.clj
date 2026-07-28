@@ -562,6 +562,9 @@
                                   refreshed token is picked up. On exception or
                                   non-string result, falls back to the client's
                                   `:access-token` then `:api-key`.
+    - `:http-fallback?`         — send plain broadcasts over HTTP POST when the
+                                  socket is not `:open` (default false). See
+                                  `supabase.realtime/broadcast`.
 
   Returns a connection map, or an anomaly on failure."
   ([client] (connect client {}))
@@ -569,10 +572,12 @@
    (let [{:keys [on-error heartbeat-ms params transport-factory
                  auto-reconnect? reconnect-after-ms max-reconnect-attempts
                  access-token-fn]
+                 http-fallback?]
           :or   {heartbeat-ms 30000
                  transport-factory ws-transport
                  auto-reconnect? true
-                 reconnect-after-ms default-reconnect-after-ms}} opts
+                 reconnect-after-ms default-reconnect-after-ms
+                 http-fallback? false}} opts
          url (build-ws-url client (or params {}))
          state (atom (initial-state))
          conn-promise (atom nil)
@@ -599,6 +604,7 @@
                    :reconnect-after-ms reconnect-after-ms
                    :max-reconnect-attempts max-reconnect-attempts
                    :access-token-fn access-token-fn
+                   :http-fallback? http-fallback?
                    :reconnect-exec reconnect-exec}
              t (transport-factory url (upgrade-headers conn) handlers)
              _ (swap! state assoc :transport t)

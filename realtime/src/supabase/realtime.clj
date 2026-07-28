@@ -36,6 +36,7 @@
        binary v2 protocol."
   (:require [supabase.core.client :as client]
             [supabase.core.error :as error]
+            [supabase.core.http :as http]
             [supabase.realtime.connection :as conn]
             [supabase.realtime.protocol :as proto]
             [supabase.realtime.specs :as specs]))
@@ -170,15 +171,38 @@
                             (fnil conj []) (proto/encode frame)))
     ch))
 
+(defn- http-broadcast!
+  "POSTs a broadcast to the Realtime REST endpoint. Returns nil on success
+  or the anomaly from `supabase.core.http/execute`."
+  [client topic event payload]
+  (let [resp (-> (http/request client)
+                 (http/with-service-url :realtime-url "/api/broadcast")
+                 (http/with-method :post)
+                 (http/with-body {:messages [{:topic topic
+                                              :event event
+                                              :payload payload}]})
+                 (http/execute))]
+    (when (error/anomaly? resp) resp)))
+
 (defn broadcast
   "Sends a broadcast message on `ch`. Buffered until the channel joins.
-  Returns `ch`."
+  Returns `ch`.
+
+  When the connection was opened with `:http-fallback? true` and the socket
+  is not `:open`, the broadcast is sent over HTTP POST to `/api/broadcast`
+  instead of buffering — mirrors realtime-ex. In that case returns `ch` on
+  HTTP success, or the anomaly from the failed request. Broadcasts sent via
+  `broadcast-with-ack` never fall back; they buffer like today."
   [ch event payload]
-  (let [topic (:topic ch)
-        cs (conn/channel-state (channel-conn ch) topic)
-        ref (new-ref ch)
-        frame (proto/broadcast-frame ref (:join-ref cs) topic event payload)]
-    (push-or-buffer! ch frame)))
+  (let [c (channel-conn ch)
+        topic (:topic ch)]
+    (if (and (:http-fallback? c)
+             (not= :open (:status @(:state c))))
+      (or (http-broadcast! (:client c) topic event payload) ch)
+      (let [cs (conn/channel-state c topic)
+            ref (new-ref ch)
+            frame (proto/broadcast-frame ref (:join-ref cs) topic event payload)]
+        (push-or-buffer! ch frame)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Broadcast acks
