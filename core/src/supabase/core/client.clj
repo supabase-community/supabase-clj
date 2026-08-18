@@ -32,9 +32,14 @@
        :functions-url  \"https://abc.supabase.co/functions/v1\"
        :realtime-url   \"https://abc.supabase.co/realtime/v1\"
        :db             {:schema \"public\"}
-       :global         {:headers {\"x-client-info\" \"supabase-clj/0.2.0\"}}
+       :client-info    {\"supabase-clj\" \"0.7.0\"}
+       :global         {:headers {}}
        :auth           {:auto-refresh-token true, :flow-type \"implicit\", ...}
        :storage        {:use-new-hostname false}}
+
+  The `:client-info` map is rendered into the structured `x-client-info`
+  header on every request (see [[format-client-info]]). Service modules
+  register themselves via [[with-client-info]].
 
   See https://supabase.com/docs/reference/javascript/initializing"
   (:require [clojure.string :as str]
@@ -89,6 +94,20 @@
              [:executor {:optional true} [:fn any?]]
              [:ssl-context {:optional true} [:fn any?]]]))
 
+(def RetryOpts
+  "Schema for retry policy options. Resolution rules live in
+  `supabase.core.retry/merge-opts`."
+  (m/schema [:map
+             [:max-attempts {:optional true} :int]
+             [:initial-delay-ms {:optional true} :int]
+             [:max-delay-ms {:optional true} :int]
+             [:multiplier {:optional true} [:fn number?]]]))
+
+(def Retries
+  "Schema for the `:retries` client option: `true` for defaults, an integer
+  max-attempts, or a full options map. Absent means retries disabled."
+  (m/schema [:or :boolean :int #'RetryOpts]))
+
 (def Client
   "Schema for the full Supabase client map."
   (m/schema [:map
@@ -105,6 +124,9 @@
              [:storage-url :string]
              [:database-url :string]
              [:realtime-url :string]
+             [:client-info {:optional true} [:map-of :string :string]]
+             [:retries {:optional true} #'Retries]
+             [:on-event {:optional true} [:fn fn?]]
              [:pool {:optional true} #'Pool]
              [:transport {:optional true} [:fn any?]]
              [:log? {:optional true} :boolean]]))
@@ -166,8 +188,32 @@
         prefix (first (str/split host #"\." 2))]
     (str "sb-" prefix "-auth-token")))
 
-(defn- default-headers []
-  {"x-client-info" (str "supabase-clj/" version)})
+;; ---------------------------------------------------------------------------
+;; Structured x-client-info
+;; ---------------------------------------------------------------------------
+
+(defn format-client-info
+  "Renders a client-info map of module name to version into the structured
+  `x-client-info` header value: entries sorted by name, joined as
+  `\"name/version; name/version\"`.
+
+      (format-client-info {\"supabase-clj\" \"0.7.0\"
+                           \"supabase-clj-postgrest\" \"1.3.0\"})
+      ;; => \"supabase-clj/0.7.0; supabase-clj-postgrest/1.3.0\""
+  [client-info]
+  (->> (sort-by key client-info)
+       (map (fn [[name v]] (str name "/" v)))
+       (str/join "; ")))
+
+(defn with-client-info
+  "Returns a new client with module `name` at `version` registered in the
+  structured `x-client-info` header. Service modules call this on the client
+  before issuing requests so the header identifies every SDK layer in use.
+
+      (-> client
+          (client/with-client-info \"supabase-clj-postgrest\" \"1.3.0\"))"
+  [client name version]
+  (assoc-in client [:client-info name] version))
 
 ;; ---------------------------------------------------------------------------
 ;; Client construction
@@ -196,6 +242,18 @@
                          Overrides `:pool` if both are given.
     - `:log?`          — when true, request/response logging is enabled
                          for every request issued via this client.
+    - `:client-info`   — map of module name to version, merged over the
+                         default `{\"supabase-clj\" \"<core-version>\"}` and
+                         rendered as the structured `x-client-info` header.
+    - `:retries`       — retry policy for transient failures: `true` for
+                         defaults, an integer max-attempts, or an options
+                         map (`:max-attempts`, `:initial-delay-ms`,
+                         `:max-delay-ms`, `:multiplier`). Absent means no
+                         retries. Overridable per request.
+    - `:on-event`      — 1-arg fn invoked with telemetry event maps
+                         (`:request-start`, `:request-end`,
+                         `:request-retry`). Handler exceptions are logged
+                         and swallowed. Overridable per request.
 
   ## Examples
 
@@ -211,8 +269,7 @@
                      (str base-url "/storage/v1") opts)
         storage-key (or (get-in opts [:auth :storage-key])
                         (default-storage-key base-url))
-        user-headers (get-in opts [:global :headers] {})
-        merged-headers (merge (default-headers) user-headers)
+        client-info (merge {"supabase-clj" version} (:client-info opts))
         pool-opts (:pool opts)
         ;; Explicit :transport > :pool-derived transport > nothing (resolves
         ;; to default-transport at request time).
@@ -230,8 +287,9 @@
                                    :realtime-url (str base-url "/realtime/v1")
                                    :functions-url (str base-url "/functions/v1")
                                    :database-url (str base-url "/rest/v1")
-                                   :storage-url storage-url}
-                                  {:global {:headers merged-headers}}
+                                   :storage-url storage-url
+                                   :client-info client-info}
+                                  {:global (or (:global opts) {})}
                                   {:auth (assoc (or (:auth opts) {})
                                                 :storage-key storage-key)})
                      chosen-transport (assoc :transport chosen-transport)

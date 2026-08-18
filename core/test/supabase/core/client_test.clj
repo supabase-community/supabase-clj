@@ -62,9 +62,9 @@
     (testing "storage defaults"
       (is (= false (get-in c [:storage :use-new-hostname]))))
 
-    (testing "global headers include x-client-info"
-      (is (string? (get-in c [:global :headers "x-client-info"])))
-      (is (re-find #"^supabase-clj/" (get-in c [:global :headers "x-client-info"]))))))
+    (testing "client-info seeds the core module entry"
+      (is (map? (:client-info c)))
+      (is (string? (get-in c [:client-info "supabase-clj"]))))))
 
 ;; ---------------------------------------------------------------------------
 ;; make-client — storage key
@@ -97,11 +97,10 @@
     (let [c (client/make-client base-url api-key :auth {:flow-type "pkce"})]
       (is (= "pkce" (get-in c [:auth :flow-type])))))
 
-  (testing "custom headers merge with defaults"
+  (testing "custom headers are preserved"
     (let [c (client/make-client base-url api-key
                                 :global {:headers {"x-custom" "val"}})]
-      (is (= "val" (get-in c [:global :headers "x-custom"])))
-      (is (some? (get-in c [:global :headers "x-client-info"]))))))
+      (is (= "val" (get-in c [:global :headers "x-custom"]))))))
 
 ;; ---------------------------------------------------------------------------
 ;; make-client — storage hostname transformation
@@ -182,3 +181,56 @@
       (is (error/anomaly? result))
       (is (= :cognitect.anomalies/incorrect (:cognitect.anomalies/category result)))
       (is (= :core (:supabase/service result))))))
+
+;; ---------------------------------------------------------------------------
+;; structured x-client-info
+;; ---------------------------------------------------------------------------
+
+(deftest format-client-info-test
+  (testing "renders name/version pairs sorted by name"
+    (is (= "supabase-clj/0.7.0"
+           (client/format-client-info {"supabase-clj" "0.7.0"})))
+    (is (= "supabase-clj/0.7.0; supabase-clj-postgrest/1.3.0"
+           (client/format-client-info {"supabase-clj-postgrest" "1.3.0"
+                                       "supabase-clj" "0.7.0"})))))
+
+(deftest with-client-info-test
+  (testing "registers a module entry on the client"
+    (let [c (-> (client/make-client base-url api-key)
+                (client/with-client-info "supabase-clj-postgrest" "1.3.0"))]
+      (is (= "1.3.0" (get-in c [:client-info "supabase-clj-postgrest"])))
+      (is (string? (get-in c [:client-info "supabase-clj"]))))))
+
+(deftest make-client-client-info-test
+  (testing "user entries merge over the core default"
+    (let [c (client/make-client base-url api-key
+                                :client-info {"supabase-clj-auth" "0.5.0"})]
+      (is (= "0.5.0" (get-in c [:client-info "supabase-clj-auth"])))
+      (is (string? (get-in c [:client-info "supabase-clj"]))))))
+
+;; ---------------------------------------------------------------------------
+;; make-client — retries and telemetry options
+;; ---------------------------------------------------------------------------
+
+(deftest make-client-retries-test
+  (testing "accepts an options map"
+    (let [c (client/make-client base-url api-key
+                                :retries {:max-attempts 3 :initial-delay-ms 100})]
+      (is (not (error/anomaly? c)))
+      (is (= 3 (get-in c [:retries :max-attempts])))))
+
+  (testing "accepts true and integer forms"
+    (is (not (error/anomaly? (client/make-client base-url api-key :retries true))))
+    (is (not (error/anomaly? (client/make-client base-url api-key :retries 5)))))
+
+  (testing "rejects invalid values"
+    (is (error/anomaly? (client/make-client base-url api-key :retries "always")))))
+
+(deftest make-client-on-event-test
+  (testing "accepts a telemetry handler fn"
+    (let [c (client/make-client base-url api-key :on-event (fn [_]))]
+      (is (not (error/anomaly? c)))
+      (is (fn? (:on-event c)))))
+
+  (testing "rejects non-fn handlers"
+    (is (error/anomaly? (client/make-client base-url api-key :on-event "nope")))))

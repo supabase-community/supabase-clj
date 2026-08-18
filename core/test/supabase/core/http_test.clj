@@ -390,3 +390,250 @@
       (is (= "https://app.com" (get-in req [:query "redirect_to"])))
       (is (some? (get-in req [:headers "authorization"])))
       (is (some? (get-in req [:headers "apikey"]))))))
+
+;; ---------------------------------------------------------------------------
+;; retries
+;; ---------------------------------------------------------------------------
+
+(defn scripted-transport
+  "Transport that yields `scripts` in order (response maps or 0-arg fns,
+  which may throw) and counts calls. Async mirrors sync."
+  [scripts]
+  (let [calls (atom 0)
+        remaining (atom scripts)
+        next! (fn []
+                (swap! calls inc)
+                (let [s (first @remaining)]
+                  (swap! remaining rest)
+                  (if (fn? s) (s) s)))]
+    [calls
+     (reify transport/Transport
+       (execute [_ _] (next!))
+       (execute-async [_ _] (CompletableFuture/completedFuture (next!))))]))
+
+(def retry-client
+  (client/make-client base-url api-key
+                      :retries {:max-attempts 3 :initial-delay-ms 1 :max-delay-ms 2}))
+
+(deftest execute-retry-transient-status-test
+  (testing "503 then 200 retries and succeeds"
+    (let [[calls t] (scripted-transport [{:status 503 :body "{}" :headers {}}
+                                         {:status 200 :body "{\"ok\":true}" :headers {}}])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (= 200 (:status res)))
+      (is (= {:ok true} (:body res)))
+      (is (= 2 @calls))))
+
+  (testing "429 is retried"
+    (let [[calls t] (scripted-transport [{:status 429 :body "{}" :headers {}}
+                                         {:status 200 :body "{}" :headers {}}])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (= 200 (:status res)))
+      (is (= 2 @calls))))
+
+  (testing "attempts give up at max-attempts and return the anomaly"
+    (let [[calls t] (scripted-transport (repeat {:status 503 :body "{}" :headers {}}))
+          res (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (error/anomaly? res))
+      (is (= 503 (:http/status res)))
+      (is (= 3 @calls)))))
+
+(deftest execute-retry-after-test
+  (testing "Retry-After header sets the retry delay"
+    (let [events (atom [])
+          [calls t] (scripted-transport [{:status 429 :body "{}" :headers {"retry-after" "1"}}
+                                         {:status 200 :body "{}" :headers {}}])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  (http/with-on-event (fn [e] (swap! events conj e)))
+                  http/execute)]
+      (is (= 200 (:status res)))
+      (is (= 2 @calls))
+      (let [retry-event (first (filter #(= :request-retry (:event %)) @events))]
+        (is (= 1000 (:delay-ms retry-event)))))))
+
+(deftest execute-retry-non-transient-test
+  (testing "400 is not retried"
+    (let [[calls t] (scripted-transport [{:status 400 :body "{}" :headers {}}])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (error/anomaly? res))
+      (is (= 1 @calls))))
+
+  (testing "500 is not retried"
+    (let [[calls t] (scripted-transport [{:status 500 :body "{}" :headers {}}])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (= 500 (:http/status res)))
+      (is (= 1 @calls)))))
+
+(deftest execute-retry-overrides-test
+  (testing "request :retries false disables client retries"
+    (let [[calls t] (scripted-transport [{:status 503 :body "{}" :headers {}}])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  (http/with-retries false)
+                  http/execute)]
+      (is (= 503 (:http/status res)))
+      (is (= 1 @calls))))
+
+  (testing "request :retries enables retries when the client has none"
+    (let [[calls t] (scripted-transport [{:status 503 :body "{}" :headers {}}
+                                         {:status 200 :body "{}" :headers {}}])
+          res (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  (http/with-retries {:max-attempts 2 :initial-delay-ms 1 :max-delay-ms 2})
+                  http/execute)]
+      (is (= 200 (:status res)))
+      (is (= 2 @calls))))
+
+  (testing "no retries configured means a single attempt"
+    (let [[calls t] (scripted-transport [{:status 503 :body "{}" :headers {}}])
+          res (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (= 503 (:http/status res)))
+      (is (= 1 @calls)))))
+
+(deftest execute-retry-non-replayable-test
+  (testing "InputStream bodies are never retried"
+    (let [[calls t] (scripted-transport [{:status 503 :body "{}" :headers {}}])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :storage-url "/object/x")
+                  (http/with-method :post)
+                  (http/with-body (ByteArrayInputStream. (.getBytes "data")))
+                  (http/with-transport t)
+                  http/execute)]
+      (is (= 503 (:http/status res)))
+      (is (= 1 @calls))))
+
+  (testing "multipart payloads are never retried"
+    (let [[calls t] (scripted-transport [{:status 503 :body "{}" :headers {}}])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :storage-url "/object/x")
+                  (http/with-method :post)
+                  (http/with-multipart [{:name "file" :content "data"}])
+                  (http/with-transport t)
+                  http/execute)]
+      (is (= 503 (:http/status res)))
+      (is (= 1 @calls)))))
+
+(deftest execute-retry-transient-exception-test
+  (testing "connection reset is retried, then succeeds"
+    (let [[calls t] (scripted-transport [(fn [] (throw (java.net.SocketException. "Connection reset")))
+                                         {:status 200 :body "{}" :headers {}}])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (= 200 (:status res)))
+      (is (= 2 @calls))))
+
+  (testing "non-transient exceptions are not retried"
+    (let [[calls t] (scripted-transport [(fn [] (throw (RuntimeException. "boom")))])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute)]
+      (is (error/anomaly? res))
+      (is (= :exception (:supabase/code res)))
+      (is (= 1 @calls)))))
+
+(deftest execute-async-retry-test
+  (testing "async retries a transient status and resolves"
+    (let [[calls t] (scripted-transport [{:status 503 :body "{}" :headers {}}
+                                         {:status 200 :body "{\"ok\":true}" :headers {}}])
+          fut (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  http/execute-async)]
+      (is (= {:ok true} (:body @fut)))
+      (is (= 2 @calls)))))
+
+;; ---------------------------------------------------------------------------
+;; telemetry
+;; ---------------------------------------------------------------------------
+
+(deftest execute-on-event-test
+  (testing "emits start and end events for a simple request"
+    (let [events (atom [])
+          [_ t] (stub-transport {:status 200 :body "{}" :headers {}})
+          res (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/health")
+                  (http/with-transport t)
+                  (http/with-on-event (fn [e] (swap! events conj e)))
+                  http/execute)]
+      (is (= 200 (:status res)))
+      (is (= [:request-start :request-end] (mapv :event @events)))
+      (let [end (last @events)]
+        (is (= 200 (:status end)))
+        (is (= :auth (:service end)))
+        (is (= :get (:method end)))
+        (is (nat-int? (:elapsed-ms end))))))
+
+  (testing "emits retry events between attempts"
+    (let [events (atom [])
+          [_ t] (scripted-transport [{:status 503 :body "{}" :headers {}}
+                                     {:status 200 :body "{}" :headers {}}])
+          res (-> (http/request retry-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  (http/with-on-event (fn [e] (swap! events conj e)))
+                  http/execute)]
+      (is (= 200 (:status res)))
+      (is (= [:request-start :request-retry :request-start :request-end]
+             (mapv :event @events)))
+      (let [retry-event (second @events)]
+        (is (= 1 (:attempt retry-event)))
+        (is (nat-int? (:delay-ms retry-event)))
+        (is (= 503 (:status retry-event))))))
+
+  (testing "client-level :on-event applies without a request override"
+    (let [events (atom [])
+          c (client/make-client base-url api-key :on-event (fn [e] (swap! events conj e)))
+          [_ t] (stub-transport {:status 200 :body "{}" :headers {}})
+          _ (-> (http/request c)
+                (http/with-service-url :auth-url "/")
+                (http/with-transport t)
+                http/execute)]
+      (is (= [:request-start :request-end] (mapv :event @events)))))
+
+  (testing "a throwing handler does not break the request"
+    (let [_ (stub-transport {:status 200 :body "{}" :headers {}})
+          [_ t] (stub-transport {:status 200 :body "{}" :headers {}})
+          res (-> (http/request test-client)
+                  (http/with-service-url :auth-url "/")
+                  (http/with-transport t)
+                  (http/with-on-event (fn [_] (throw (RuntimeException. "handler boom"))))
+                  http/execute)]
+      (is (= 200 (:status res)))))
+
+  (testing "anomaly results emit end events with category and code"
+    (let [events (atom [])
+          [_ t] (stub-transport {:status 404 :body "{}" :headers {}})
+          _ (-> (http/request test-client)
+                (http/with-service-url :auth-url "/")
+                (http/with-transport t)
+                (http/with-on-event (fn [e] (swap! events conj e)))
+                http/execute)
+          end (last @events)]
+      (is (= :request-end (:event end)))
+      (is (= :cognitect.anomalies/not-found (:category end)))
+      (is (= :not-found (:code end))))))

@@ -38,7 +38,14 @@ Creates and manages immutable client configuration maps.
 
 ;; Update access token (returns a new map)
 (supabase/update-access-token my-client "new-jwt-token")
+
+;; Register a service module in the x-client-info header
+(supabase/with-client-info my-client "supabase-clj-postgrest" "1.3.0")
 ```
+
+The `:client-info` map is sent as a structured `x-client-info` header on
+every request (`"name/version; name/version"`). Service modules call
+`with-client-info` so the header identifies every SDK layer in use.
 
 #### Client Map Structure
 
@@ -52,7 +59,8 @@ Creates and manages immutable client configuration maps.
  :functions-url  "https://abc123.supabase.co/functions/v1"
  :realtime-url   "https://abc123.supabase.co/realtime/v1"
  :db             {:schema "public"}
- :global         {:headers {"x-client-info" "supabase-clj/0.3.0"}}
+ :client-info    {"supabase-clj" "0.6.1"}
+ :global         {:headers {}}
  :auth           {:auto-refresh-token true
                   :debug false
                   :detect-session-in-url true
@@ -81,6 +89,44 @@ Composable HTTP request builder and executor.
 ;; Async variant
 @(http/execute-async req)  ;; returns CompletableFuture
 ```
+
+#### Retries
+
+Transient failures (status 429, 502, 503, 504, and connection resets or
+timeouts) can be retried with exponential backoff and jitter, honoring
+`Retry-After`. Retries are off by default; enable them on the client and
+override per request:
+
+```clojure
+;; Client-level: true for defaults, an integer max-attempts, or an opts map
+(supabase/make-client url key
+  :retries {:max-attempts 3 :initial-delay-ms 200
+            :max-delay-ms 5000 :multiplier 2.0})
+
+;; Per-request override
+(-> (http/request client)
+    (http/with-retries false) ;; opt this request out
+    (http/execute))
+```
+
+Requests with non-replayable bodies (`InputStream`, multipart) are never
+retried.
+
+#### Telemetry
+
+Set `:on-event` on the client (or per request) to observe request
+lifecycle events without any metrics dependency:
+
+```clojure
+(supabase/make-client url key
+  :on-event (fn [event] (prn event)))
+;; {:event :request-start :service :auth :method :post :url "..." :attempt 1}
+;; {:event :request-retry ... :delay-ms 400 :status 503}
+;; {:event :request-end   ... :elapsed-ms 12 :status 200}
+```
+
+Handler exceptions are logged and swallowed: telemetry never breaks a
+request.
 
 #### Response Format
 
