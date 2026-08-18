@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.6.1...core-v0.7.0) (2026-08-18)
+
+
+### Features
+
+* **core:** retry policy, telemetry seam, structured x-client-info ([0aec21c](https://github.com/supabase-community/supabase-clj/commit/0aec21c3299828e90e7915d1ba37b330ab79e432))
+
 ## [0.6.1](https://github.com/supabase-community/supabase-clj/compare/core-v0.6.0...core-v0.6.1) (2026-07-28)
 
 
