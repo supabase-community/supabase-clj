@@ -5,7 +5,8 @@
   user retrieval and sign-up, the full session/identity lifecycle
   (`verify-otp`, `refresh-session`, `update-user`, `resend`,
   `reset-password-for-email`, `exchange-code-for-session`, `reauthenticate`,
-  `get-claims`, identity linking) and server observability
+  `get-claims`, identity linking), user OAuth grant management
+  (`list-oauth-grants`, `revoke-oauth-grant`) and server observability
   (`get-server-health`, `get-server-settings`).
 
   See `supabase.auth.admin` for the service-role admin API.
@@ -23,6 +24,7 @@
   Each function returns `{:status :body :headers}` on success or an anomaly
   map on failure. See https://supabase.com/docs/reference/javascript/auth-api"
   (:require [clojure.string :as str]
+            [supabase.auth.errors :as errors]
             [supabase.auth.jwt :as jwt]
             [supabase.auth.specs :as specs]
             [supabase.core.client :as client]
@@ -43,6 +45,7 @@
 (def ^:private settings-uri "/settings")
 (def ^:private identities-authorize-uri "/user/identities/authorize")
 (def ^:private identities-uri "/user/identities")
+(def ^:private oauth-grants-uri "/user/oauth/grants")
 
 (defn- snake-keys [m]
   (when m
@@ -61,6 +64,7 @@
           (http/with-service-url :auth-url token-uri)
           (http/with-query {"grant_type" grant-type})
           (http/with-body body)
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn get-user
@@ -78,6 +82,7 @@
           (http/with-method :get)
           (http/with-service-url :auth-url single-user-uri)
           (http/with-headers {"authorization" (str "Bearer " access-token)})
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn sign-up
@@ -105,6 +110,7 @@
           (http/with-method :post)
           (http/with-service-url :auth-url sign-up-uri)
           (http/with-body (snake-keys (select-keys credentials [:email :phone :password])))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn sign-in-with-password
@@ -218,6 +224,7 @@
             (http/with-service-url :auth-url otp-uri)
             (http/with-query (cond-> {} email-redirect-to (assoc "redirect_to" email-redirect-to)))
             (http/with-body body)
+            (errors/with-auth-errors)
             (http/execute)))))
 
 (defn sign-in-with-sso
@@ -251,6 +258,7 @@
             (http/with-service-url :auth-url sso-uri)
             (http/with-query (cond-> {} redirect-to (assoc "redirect_to" redirect-to)))
             (http/with-body body)
+            (errors/with-auth-errors)
             (http/execute)))))
 
 (defn sign-in-anonymously
@@ -275,6 +283,7 @@
           (http/with-method :post)
           (http/with-service-url :auth-url sign-up-uri)
           (http/with-body (select-keys credentials [:data]))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn- oauth-query [{:keys [provider options]}]
@@ -364,6 +373,7 @@
             (http/with-service-url :auth-url verify-uri)
             (http/with-query (cond-> {} redirect-to (assoc "redirect_to" redirect-to)))
             (http/with-body body)
+            (errors/with-auth-errors)
             (http/execute)))))
 
 (defn refresh-session
@@ -409,6 +419,8 @@
     * `:email` — new email address
     * `:phone` — new phone number
     * `:password` — new password
+    * `:current-password` - the user's current password; required by the
+      server when secure password change is enabled
     * `:nonce` — reauthentication nonce (for password change after `reauthenticate`)
     * `:data` — user metadata map
 
@@ -423,6 +435,7 @@
           (http/with-service-url :auth-url single-user-uri)
           (with-auth access-token)
           (http/with-body (snake-keys attrs))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn resend
@@ -455,6 +468,7 @@
             (http/with-service-url :auth-url resend-uri)
             (http/with-query (cond-> {} email-redirect-to (assoc "redirect_to" email-redirect-to)))
             (http/with-body body)
+            (errors/with-auth-errors)
             (http/execute)))))
 
 (defn reset-password-for-email
@@ -484,6 +498,7 @@
            (http/with-query (cond-> {} (:redirect-to options)
                                     (assoc "redirect_to" (:redirect-to options))))
            (http/with-body {:email email})
+           (errors/with-auth-errors)
            (http/execute)))))
 
 (defn reauthenticate
@@ -500,6 +515,7 @@
           (http/with-method :get)
           (http/with-service-url :auth-url reauthenticate-uri)
           (with-auth access-token)
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn get-claims
@@ -562,6 +578,7 @@
           (http/with-service-url :auth-url identities-authorize-uri)
           (with-auth access-token)
           (http/with-query (assoc (oauth-query credentials) "skip_http_redirect" "true"))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn unlink-identity
@@ -577,6 +594,7 @@
           (http/with-method :delete)
           (http/with-service-url :auth-url (str identities-uri "/" identity-id))
           (with-auth access-token)
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn get-user-identities
@@ -594,6 +612,49 @@
       (assoc resp :body (get-in resp [:body :identities])))))
 
 ;; ---------------------------------------------------------------------------
+;; OAuth grants
+;; ---------------------------------------------------------------------------
+
+(defn list-oauth-grants
+  "Lists the OAuth grants the user identified by `access-token` has
+  authorized. Only relevant when the OAuth 2.1 server is enabled in
+  Supabase Auth.
+
+  On success the body is a vector of grants, each carrying `:client` (the
+  OAuth client info), `:scopes` and `:granted_at`.
+
+  ## Example
+
+      (list-oauth-grants client \"<access-token>\")"
+  [client access-token]
+  (or (client/ensure-client client)
+      (-> (http/request client)
+          (http/with-method :get)
+          (http/with-service-url :auth-url oauth-grants-uri)
+          (with-auth access-token)
+          (errors/with-auth-errors)
+          (http/execute))))
+
+(defn revoke-oauth-grant
+  "Revokes the user's OAuth grant for the OAuth client `client-id`.
+  Revocation marks the consent as revoked, deletes the user's sessions for
+  that client and invalidates the associated refresh tokens. Only relevant
+  when the OAuth 2.1 server is enabled in Supabase Auth.
+
+  ## Example
+
+      (revoke-oauth-grant client \"<access-token>\" \"<client-id>\")"
+  [client access-token client-id]
+  (or (client/ensure-client client)
+      (-> (http/request client)
+          (http/with-method :delete)
+          (http/with-service-url :auth-url oauth-grants-uri)
+          (with-auth access-token)
+          (http/with-query {"client_id" client-id})
+          (errors/with-auth-errors)
+          (http/execute))))
+
+;; ---------------------------------------------------------------------------
 ;; Server observability
 ;; ---------------------------------------------------------------------------
 
@@ -608,6 +669,7 @@
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url health-uri)
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn get-server-settings
@@ -621,6 +683,7 @@
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url settings-uri)
+          (errors/with-auth-errors)
           (http/execute))))
 
 ;; ---------------------------------------------------------------------------

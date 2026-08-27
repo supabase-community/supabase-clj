@@ -334,6 +334,15 @@
 (deftest update-user-empty-invalid-test
   (is (error/anomaly? (auth/update-user test-client "tok" {}))))
 
+(deftest update-user-current-password-test
+  (let [[_ req] (run-with-capture
+                 #(auth/update-user test-client "user-tok"
+                                    {:password "new-secret"
+                                     :current-password "old-secret"}))
+        body (parse-body req)]
+    (is (= "new-secret" (get body "password")))
+    (is (= "old-secret" (get body "current_password")))))
+
 ;; ---------------------------------------------------------------------------
 ;; resend
 ;; ---------------------------------------------------------------------------
@@ -403,6 +412,28 @@
     (let [resp (auth/get-user-identities test-client "user-tok")]
       (is (= 200 (:status resp)))
       (is (= [{:id "i1"} {:id "i2"}] (:body resp))))))
+
+;; ---------------------------------------------------------------------------
+;; OAuth grants
+;; ---------------------------------------------------------------------------
+
+(deftest list-oauth-grants-test
+  (let [[_ req] (run-with-capture #(auth/list-oauth-grants test-client "user-tok"))]
+    (is (= :get (:method req)))
+    (is (= (str base-url "/auth/v1/user/oauth/grants") (:url req)))
+    (is (= "Bearer user-tok" (get-in req [:headers "authorization"])))))
+
+(deftest revoke-oauth-grant-test
+  (let [[_ req] (run-with-capture
+                 #(auth/revoke-oauth-grant test-client "user-tok" "client-1"))]
+    (is (= :delete (:method req)))
+    (is (= (str base-url "/auth/v1/user/oauth/grants") (:url req)))
+    (is (= "client-1" (get-in req [:query "client_id"])))
+    (is (= "Bearer user-tok" (get-in req [:headers "authorization"])))))
+
+(deftest oauth-grants-invalid-client-test
+  (is (error/anomaly? (auth/list-oauth-grants {} "user-tok")))
+  (is (error/anomaly? (auth/revoke-oauth-grant {} "user-tok" "client-1"))))
 
 ;; ---------------------------------------------------------------------------
 ;; server observability

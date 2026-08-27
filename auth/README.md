@@ -43,7 +43,8 @@ Each function returns `{:status :body :headers}` on success, or an anomaly map o
 ;; PKCE: exchange the redirect code for a session
 (auth/exchange-code-for-session c {:auth-code "<code>" :code-verifier "<verifier>"})
 
-;; Update the authenticated user
+;; Update the authenticated user (pass :current-password when the server
+;; requires it for password changes)
 (auth/update-user c "<access-token>" {:password "new-secret"})
 
 ;; Resend a confirmation, recover a password
@@ -57,6 +58,10 @@ Each function returns `{:status :body :headers}` on success, or an anomaly map o
 (auth/link-identity c "<access-token>" {:provider "github"})
 (auth/get-user-identities c "<access-token>")
 (auth/unlink-identity c "<access-token>" "<identity-id>")
+
+;; OAuth 2.1 server: list and revoke the user's OAuth grants
+(auth/list-oauth-grants c "<access-token>")
+(auth/revoke-oauth-grant c "<access-token>" "<client-id>")
 
 ;; Server observability
 (auth/get-server-health c)
@@ -109,6 +114,22 @@ All functions validate the client and credentials before issuing the request. Va
 ```
 
 Schemas live in [`supabase.auth.specs`](src/supabase/auth/specs.clj).
+
+## Auth error details
+
+Anomalies from Auth calls keep the server's own message on 5xx responses
+instead of a generic status phrase. Weak-password rejections (sign-up,
+password update) are tagged `:supabase/code :weak-password` and list the
+failing rules under `:auth/weak-password-reasons`:
+
+```clojure
+(auth/sign-up c {:email "user@example.com" :password "123"})
+;; => {:cognitect.anomalies/category :cognitect.anomalies/incorrect
+;;     :cognitect.anomalies/message  "Password is too weak"
+;;     :supabase/code                :weak-password
+;;     :auth/weak-password-reasons   ["length" "characters"]
+;;     ...}
+```
 
 ## Development
 

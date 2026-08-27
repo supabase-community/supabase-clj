@@ -59,6 +59,14 @@
     (is (error/anomaly?
          (providers/create-provider test-client (assoc valid-params :provider-type "saml"))))))
 
+(deftest create-provider-with-claims-allowlist-test
+  (let [[_ req] (run-with-capture
+                 #(providers/create-provider
+                   test-client
+                   (assoc valid-params :custom-claims-allowlist ["groups" "org_id"])))
+        body (parse-body req)]
+    (is (= ["groups" "org_id"] (get body "custom_claims_allowlist")))))
+
 (deftest get-provider-test
   (let [[_ req] (run-with-capture #(providers/get-provider test-client "acme"))]
     (is (= :get (:method req)))
@@ -77,6 +85,13 @@
     (is (error/anomaly? (providers/update-provider test-client "acme" {}))))
   (testing "identifier immutable"
     (is (error/anomaly? (providers/update-provider test-client "acme" {:identifier "other"})))))
+
+(deftest update-provider-with-claims-allowlist-test
+  (let [[_ req] (run-with-capture
+                 #(providers/update-provider test-client "acme"
+                                             {:custom-claims-allowlist ["groups"]}))
+        body (parse-body req)]
+    (is (= ["groups"] (get body "custom_claims_allowlist")))))
 
 (deftest delete-provider-test
   (let [[_ req] (run-with-capture #(providers/delete-provider test-client "acme"))]

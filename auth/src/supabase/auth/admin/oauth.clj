@@ -22,6 +22,7 @@
   Each function returns `{:status :body :headers}` on success or an anomaly
   map on failure."
   (:require [clojure.string :as str]
+            [supabase.auth.errors :as errors]
             [supabase.auth.specs :as specs]
             [supabase.core.client :as client]
             [supabase.core.http :as http]))
@@ -57,6 +58,7 @@
            (http/with-query (cond-> {}
                               (:page opts)     (assoc "page" (:page opts))
                               (:per-page opts) (assoc "per_page" (:per-page opts))))
+           (errors/with-auth-errors)
            (http/execute)))))
 
 (defn create-client
@@ -86,6 +88,7 @@
           (http/with-method :post)
           (http/with-service-url :auth-url clients-uri)
           (http/with-body (snake-keys params))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn get-client
@@ -99,6 +102,7 @@
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url (client-path client-id))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn update-client
@@ -116,6 +120,7 @@
           (http/with-method :put)
           (http/with-service-url :auth-url (client-path client-id))
           (http/with-body (snake-keys params))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn delete-client
@@ -130,6 +135,7 @@
       (-> (http/request client)
           (http/with-method :delete)
           (http/with-service-url :auth-url (client-path client-id))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn regenerate-client-secret
@@ -144,4 +150,5 @@
       (-> (http/request client)
           (http/with-method :post)
           (http/with-service-url :auth-url (client-path client-id "regenerate_secret"))
+          (errors/with-auth-errors)
           (http/execute))))

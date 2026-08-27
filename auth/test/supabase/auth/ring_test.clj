@@ -78,3 +78,15 @@
             result (atom nil)]
         (app (request-with-token "tok") #(reset! result %) #(throw %))
         (is (= "user-1" (get-in @result [:body :supabase/claims :sub])))))))
+
+(deftest wrap-authentication-enriched-anomaly-test
+  (testing "anomalies carrying auth error details (weak-password, 5xx body) still reject"
+    (with-redefs [auth/get-claims (fn [_ _]
+                                    {:cognitect.anomalies/category :cognitect.anomalies/incorrect
+                                     :cognitect.anomalies/message "Password is too weak"
+                                     :supabase/code :weak-password
+                                     :auth/weak-password-reasons ["length"]
+                                     :http/status 422
+                                     :http/body {:code "weak_password"}})]
+      (let [app (auth.ring/wrap-authentication echo-handler test-client {:required? true})]
+        (is (= 401 (:status (app (request-with-token "bad")))))))))

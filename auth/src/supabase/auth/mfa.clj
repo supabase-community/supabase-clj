@@ -22,6 +22,7 @@
   map on failure. See https://supabase.com/docs/guides/auth/auth-mfa"
   (:require [clojure.string :as str]
             [supabase.auth :as auth]
+            [supabase.auth.errors :as errors]
             [supabase.auth.jwt :as jwt]
             [supabase.auth.specs :as specs]
             [supabase.core.client :as client]
@@ -68,6 +69,7 @@
           (http/with-service-url :auth-url factors-uri)
           (with-auth access-token)
           (http/with-body (snake-keys params))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn challenge
@@ -93,6 +95,7 @@
            (http/with-service-url :auth-url (factor-path factor-id "challenge"))
            (with-auth access-token)
            (http/with-body (snake-keys params))
+           (errors/with-auth-errors)
            (http/execute)))))
 
 (defn verify
@@ -116,6 +119,7 @@
           (http/with-service-url :auth-url (factor-path factor-id "verify"))
           (with-auth access-token)
           (http/with-body (assoc (snake-keys params) :challenge_id challenge-id))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn unenroll
@@ -130,6 +134,7 @@
           (http/with-method :delete)
           (http/with-service-url :auth-url (factor-path factor-id))
           (with-auth access-token)
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn challenge-and-verify

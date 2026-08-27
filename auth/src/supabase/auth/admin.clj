@@ -19,6 +19,7 @@
   Each function returns `{:status :body :headers}` on success or an anomaly
   map on failure. See https://supabase.com/docs/reference/javascript/auth-admin-api"
   (:require [clojure.string :as str]
+            [supabase.auth.errors :as errors]
             [supabase.auth.specs :as specs]
             [supabase.core.client :as client]
             [supabase.core.http :as http]))
@@ -62,6 +63,7 @@
              (http/with-query (cond-> {} (:redirect-to options)
                                       (assoc "redirect_to" (:redirect-to options))))
              (http/with-body body)
+             (errors/with-auth-errors)
              (http/execute))))))
 
 (defn generate-link
@@ -96,6 +98,7 @@
             (http/with-method :post)
             (http/with-service-url :auth-url generate-link-uri)
             (http/with-body body)
+            (errors/with-auth-errors)
             (http/execute)))))
 
 (defn create-user
@@ -119,6 +122,7 @@
           (http/with-method :post)
           (http/with-service-url :auth-url (users-path))
           (http/with-body (snake-keys attrs))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn list-users
@@ -144,6 +148,7 @@
            (http/with-query (cond-> {}
                               (:page opts)     (assoc "page" (:page opts))
                               (:per-page opts) (assoc "per_page" (:per-page opts))))
+           (errors/with-auth-errors)
            (http/execute)))))
 
 (defn get-user-by-id
@@ -157,6 +162,7 @@
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url (users-path id))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn update-user-by-id
@@ -173,6 +179,7 @@
           (http/with-method :put)
           (http/with-service-url :auth-url (users-path id))
           (http/with-body (snake-keys attrs))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn delete-user
@@ -190,6 +197,7 @@
            (http/with-method :delete)
            (http/with-service-url :auth-url (users-path id))
            (http/with-body {:should_soft_delete (boolean soft?)})
+           (errors/with-auth-errors)
            (http/execute)))))
 
 (defn list-factors
@@ -203,6 +211,7 @@
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url (users-path id "factors"))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn delete-factor
@@ -216,6 +225,7 @@
       (-> (http/request client)
           (http/with-method :delete)
           (http/with-service-url :auth-url (users-path id "factors" factor-id))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn list-identities
@@ -229,6 +239,7 @@
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url (users-path id "identities"))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn delete-identity
@@ -242,6 +253,7 @@
       (-> (http/request client)
           (http/with-method :delete)
           (http/with-service-url :auth-url (users-path id "identities" identity-id))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn sign-out
@@ -266,4 +278,5 @@
            (http/with-service-url :auth-url logout-uri)
            (http/with-headers {"authorization" (str "Bearer " access-token)})
            (http/with-query {"scope" scope})
+           (errors/with-auth-errors)
            (http/execute)))))

@@ -226,6 +226,7 @@
               [:email {:optional true} [:maybe :string]]
               [:phone {:optional true} [:maybe :string]]
               [:password {:optional true} [:maybe :string]]
+              [:current-password {:optional true} [:maybe :string]]
               [:nonce {:optional true} [:maybe :string]]
               [:data {:optional true} [:maybe :map]]]
              [:fn {:error/message "at least one attribute must be provided"}
@@ -358,6 +359,7 @@
 (def ^:private custom-provider-tuning
   [[:acceptable-client-ids {:optional true} [:maybe [:vector :string]]]
    [:scopes {:optional true} [:maybe [:vector :string]]]
+   [:custom-claims-allowlist {:optional true} [:maybe [:vector :string]]]
    [:pkce-enabled {:optional true} [:maybe :boolean]]
    [:attribute-mapping {:optional true} [:maybe :map]]
    [:authorization-params {:optional true} [:maybe :map]]

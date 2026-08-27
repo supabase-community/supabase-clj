@@ -25,6 +25,7 @@
   Each function returns `{:status :body :headers}` on success or an anomaly
   map on failure."
   (:require [clojure.string :as str]
+            [supabase.auth.errors :as errors]
             [supabase.auth.specs :as specs]
             [supabase.core.client :as client]
             [supabase.core.http :as http]))
@@ -54,6 +55,7 @@
            (http/with-method :get)
            (http/with-service-url :auth-url providers-uri)
            (http/with-query (cond-> {} (:type opts) (assoc "type" (:type opts))))
+           (errors/with-auth-errors)
            (http/execute)))))
 
 (defn create-provider
@@ -74,6 +76,9 @@
     * `:acceptable-client-ids`, `:scopes`, `:pkce-enabled`,
       `:attribute-mapping`, `:authorization-params`, `:enabled`,
       `:email-optional`, `:skip-nonce-check` — optional behavior tuning
+    * `:custom-claims-allowlist` - vector of IdP claim keys to copy verbatim
+      into the user's `custom_claims`, e.g. `[\"groups\" \"org_id\"]`; opt-in,
+      defaults to empty, independent from `:attribute-mapping`
 
   ## Example
 
@@ -87,6 +92,7 @@
           (http/with-method :post)
           (http/with-service-url :auth-url providers-uri)
           (http/with-body (snake-keys params))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn get-provider
@@ -100,6 +106,7 @@
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url (provider-path identifier))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn update-provider
@@ -117,6 +124,7 @@
           (http/with-method :put)
           (http/with-service-url :auth-url (provider-path identifier))
           (http/with-body (snake-keys params))
+          (errors/with-auth-errors)
           (http/execute))))
 
 (defn delete-provider
@@ -131,4 +139,5 @@
       (-> (http/request client)
           (http/with-method :delete)
           (http/with-service-url :auth-url (provider-path identifier))
+          (errors/with-auth-errors)
           (http/execute))))
