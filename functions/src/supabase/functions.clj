@@ -143,12 +143,14 @@
 
 (defn- decode-body
   "Runs the second-pass decoder based on `:response-as` and (for
-  `:auto`) the response content-type."
+  `:auto`) the response content-type. Content-type matching is
+  case-insensitive (functions-js #2515)."
   [body content-type response-as]
   (case (or response-as :auto)
     :auto       (cond
                   (nil? content-type) body
-                  (str/starts-with? content-type "application/json")
+                  (str/starts-with? (str/lower-case content-type)
+                                    "application/json")
                   (json-decode-safe body)
                   :else body)
     :json       (json-decode-safe body)

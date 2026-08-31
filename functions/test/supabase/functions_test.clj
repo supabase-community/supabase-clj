@@ -116,6 +116,13 @@
           res (fns/invoke (with-transport test-client t) "x")]
       (is (= {:ok true} (:body res)))))
 
+  (testing ":auto content-type matching is case-insensitive"
+    (let [[_ t] (stub-transport {:status 200
+                                 :body "{\"ok\":true}"
+                                 :headers {"content-type" "Application/JSON; charset=utf-8"}})
+          res (fns/invoke (with-transport test-client t) "x")]
+      (is (= {:ok true} (:body res)))))
+
   (testing ":auto with text content-type → raw string"
     (let [[_ t] (stub-transport {:status 200
                                  :body "hello"
