@@ -8,7 +8,7 @@ TODO: one-line description.
 ;; deps.edn
 {:deps
  {io.github.supabase-community/core {:mvn/version "0.5.0"}
-  io.github.supabase-community/functions {:mvn/version "0.1.0"}}} ;; x-release-please-version
+  io.github.supabase-community/functions {:mvn/version "0.1.1"}}} ;; x-release-please-version
 ```
 
 ## Quick Start
