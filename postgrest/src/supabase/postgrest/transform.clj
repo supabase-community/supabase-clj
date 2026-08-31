@@ -3,6 +3,7 @@
   explain, rollback, returning."
   (:refer-clojure :exclude [range])
   (:require [clojure.string :as str]
+            [supabase.core.error :as error]
             [supabase.core.http :as http]
             [supabase.postgrest.specs :as specs]))
 
@@ -103,6 +104,25 @@
   decoded into a map by the default decoder."
   [req]
   (http/with-headers req {"accept" "application/geo+json"}))
+
+(defn strip-nulls
+  "Omits null-valued properties from the returned JSON objects
+  (`nulls=stripped`, requires PostgREST 11.2+).
+
+  Sets the accept header to `application/vnd.pgrst.object+json;nulls=stripped`
+  when `single` is in effect, otherwise
+  `application/vnd.pgrst.array+json;nulls=stripped`. Cannot be combined with
+  `csv` — returns an anomaly in that case. Mirrors postgrest-js
+  `stripNulls()`."
+  [req]
+  (let [accept (get-in req [:headers "accept"])]
+    (if (= "text/csv" accept)
+      (error/anomaly :cognitect.anomalies/incorrect
+                     {:cognitect.anomalies/message "strip-nulls cannot be used with csv"
+                      :supabase/service :postgrest})
+      (http/with-headers req {"accept" (if (= "application/vnd.pgrst.object+json" accept)
+                                         "application/vnd.pgrst.object+json;nulls=stripped"
+                                         "application/vnd.pgrst.array+json;nulls=stripped")}))))
 
 ;; ---------------------------------------------------------------------------
 ;; explain

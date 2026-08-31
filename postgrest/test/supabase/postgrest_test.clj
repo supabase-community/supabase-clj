@@ -324,6 +324,56 @@
     (is (= "application/vnd.pgrst.object+json"
            (get-in req [:headers "accept"])))))
 
+(deftest strip-nulls-accept
+  (testing "array media type by default"
+    (let [[_ req] (run-with-capture
+                   #(-> (pg/from test-client "t") (pg/select "*") (pg/strip-nulls) (pg/execute)))]
+      (is (= "application/vnd.pgrst.array+json;nulls=stripped"
+             (get-in req [:headers "accept"])))))
+  (testing "object media type after single"
+    (let [[_ req] (run-with-capture
+                   #(-> (pg/from test-client "t") (pg/select "*") (pg/single) (pg/strip-nulls) (pg/execute)))]
+      (is (= "application/vnd.pgrst.object+json;nulls=stripped"
+             (get-in req [:headers "accept"])))))
+  (testing "anomaly with csv"
+    (is (error/anomaly?
+         (-> (pg/from test-client "t") (pg/select "*") (pg/csv) (pg/strip-nulls))))))
+
+(deftest default-retries
+  (testing "GET requests opt into retries by default"
+    (let [[_ req] (run-with-capture
+                   #(-> (pg/from test-client "t") (pg/select [:id] {:returning true}) (pg/execute)))]
+      (is (= :get (:method req)))
+      (is (true? (:retries req)))))
+  (testing "HEAD requests opt into retries by default"
+    (let [[_ req] (run-with-capture
+                   #(-> (pg/from test-client "t") (pg/select "*") (pg/execute)))]
+      (is (= :head (:method req)))
+      (is (true? (:retries req)))))
+  (testing "mutations carry no implicit retry policy"
+    (let [[_ req] (run-with-capture
+                   #(-> (pg/from test-client "t") (pg/insert {:a 1}) (pg/execute)))]
+      (is (not (contains? req :retries)))))
+  (testing "explicit per-request opt-out wins"
+    (let [[_ req] (run-with-capture
+                   #(-> (pg/from test-client "t")
+                        (pg/select [:id] {:returning true})
+                        (pg/with-retries false)
+                        (pg/execute)))]
+      (is (false? (:retries req)))))
+  (testing "explicit per-request policy wins"
+    (let [[_ req] (run-with-capture
+                   #(-> (pg/from test-client "t")
+                        (pg/insert {:a 1})
+                        (pg/with-retries 2)
+                        (pg/execute)))]
+      (is (= 2 (:retries req)))))
+  (testing "client-level config suppresses the default"
+    (let [c (client/make-client base-url "anon-key" :retries {:max-attempts 5})
+          [_ req] (run-with-capture
+                   #(-> (pg/from c "t") (pg/select [:id] {:returning true}) (pg/execute)))]
+      (is (not (contains? req :retries))))))
+
 (deftest explain-header-formed
   (let [[_ req] (run-with-capture
                  #(-> (pg/from test-client "t")

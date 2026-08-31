@@ -93,13 +93,26 @@
         k (if (#{:get :head} (:method req)) "accept-profile" "content-profile")]
     (http/with-headers req {k schema})))
 
+(defn- with-default-retries
+  "Enables the core retry policy by default for idempotent requests
+  (GET/HEAD), unless retries were explicitly configured on the request or
+  the client. Safe to replay: these methods carry no body and no side
+  effects. Disable per-request with `(with-retries req false)` or on the
+  client via `:retries false`."
+  [req]
+  (if (and (#{:get :head} (:method req))
+           (not (contains? req :retries))
+           (not (contains? (:client req) :retries)))
+    (assoc req :retries true)
+    req))
+
 (defn execute
   "Runs the built request. Returns `{:status :body :headers}` or an
   anomaly enriched with PostgREST error metadata."
   [req]
   (if (error/anomaly? req)
     req
-    (-> req apply-profile-header http/execute pg-error/enrich)))
+    (-> req with-default-retries apply-profile-header http/execute pg-error/enrich)))
 
 (defn execute-async
   "Async variant of [[execute]]. Returns a `CompletableFuture` resolving to
@@ -115,7 +128,7 @@
   [req]
   (if (error/anomaly? req)
     (CompletableFuture/completedFuture req)
-    (let [fut (-> req apply-profile-header http/execute-async)
+    (let [fut (-> req with-default-retries apply-profile-header http/execute-async)
           out (.thenApply fut (reify java.util.function.Function
                                 (apply [_ r] (pg-error/enrich r))))]
       ;; Preserve cancellation across the enrichment stage.
@@ -183,9 +196,13 @@
 (def maybe-single transform/maybe-single)
 (def csv          transform/csv)
 (def geojson      transform/geojson)
+(def strip-nulls  transform/strip-nulls)
 (def explain      transform/explain)
 (def rollback     transform/rollback)
 (def returning    transform/returning)
+
+;; Request options
+(def with-retries http/with-retries)
 
 ;; RLS headers
 (def with-access-token rls/with-access-token)
