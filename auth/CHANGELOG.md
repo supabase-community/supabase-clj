@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/supabase-community/supabase-clj/compare/auth-v0.4.0...auth-v0.5.0) (2026-08-27)
+
+
+### Features
+
+* **auth:** custom-claims allowlist, OAuth grants, current-password, error polish ([fd51395](https://github.com/supabase-community/supabase-clj/commit/fd513956f19bfd4b5d15138385874f6e8d62d088))
+
 ## [0.4.0](https://github.com/supabase-community/supabase-clj/compare/auth-v0.3.0...auth-v0.4.0) (2026-07-20)
 
 
