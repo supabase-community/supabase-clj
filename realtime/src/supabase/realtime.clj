@@ -97,6 +97,23 @@
 (defn- normalize-postgres-filter [filter]
   (update filter :event #(if (= "*" %) :all (keyword %))))
 
+(defn- same-postgres-filter?
+  "True when two postgres_changes filters would be collapsed into a single
+  server subscription: equal event, schema, table, and filter (absent and
+  nil treated alike). Mirrors realtime-js `isSamePostgresFilter`."
+  [a b]
+  (= ((juxt :event :schema :table :filter) a)
+     ((juxt :event :schema :table :filter) b)))
+
+(defn- duplicate-postgres-binding?
+  "True when channel `topic` already holds a postgres_changes binding with
+  an equivalent filter."
+  [conn topic filter]
+  (boolean
+   (some #(and (= :postgres-changes (:type %))
+               (same-postgres-filter? (:filter %) filter))
+         (:bindings (conn/channel-state conn topic)))))
+
 (defn on
   "Registers a binding on `ch`. Returns the channel value (for threading)
   or an anomaly on validation failure.
@@ -108,6 +125,12 @@
     :broadcast         — filter `{:event \"typing\"}` (use `\"*\"` for all)
     :presence          — filter `{:event :sync | :join | :leave}`
 
+  Registering the same postgres_changes filter twice is a no-op (the
+  duplicate is dropped and the connection's `:on-error` is notified with a
+  `:duplicate-binding` anomaly): the server collapses identical filters
+  into one subscription, so keeping the duplicate would desync client and
+  server binding lists and fail `subscribe` with a mismatch.
+
   Must be called BEFORE `subscribe` for postgres_changes — server-side
   binding ids are correlated at join time."
   [ch binding-type filter callback]
@@ -117,9 +140,23 @@
                       filter)
             binding {:type binding-type
                      :filter filter'
-                     :callback callback}]
-        (conn/add-binding! (:conn ch) (:topic ch) binding)
-        ch)))
+                     :callback callback}
+            c (:conn ch)
+            topic (:topic ch)]
+        (if (and (= :postgres-changes binding-type)
+                 (duplicate-postgres-binding? c topic filter'))
+          (do (when-let [f (:on-error c)]
+                (f (error/anomaly :cognitect.anomalies/incorrect
+                                  {:cognitect.anomalies/message
+                                   (str "duplicate postgres-changes binding for "
+                                        topic " ignored")
+                                   :supabase/service :realtime
+                                   :supabase/code :duplicate-binding
+                                   :realtime/topic topic
+                                   :realtime/filter filter'})))
+              ch)
+          (do (conn/add-binding! c topic binding)
+              ch)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Lifecycle ops on a channel
@@ -292,13 +329,19 @@
 
 (defn set-auth
   "Refreshes the auth token for a channel or every joined channel on a
-  connection. Sends an `access_token` event per joined channel."
+  connection. Sends an `access_token` event per joined channel.
+
+  The token is recorded on the connection and resolved into subsequent
+  join/rejoin payloads (unless an `:access-token-fn` is set — its result
+  always wins). Pass nil to clear it on sign-out, so a stale token no
+  longer leaks into later join payloads."
   [ch-or-conn token]
   (cond
     ;; conn map
     (and (map? ch-or-conn) (:state ch-or-conn) (:reconnect-exec ch-or-conn))
     (let [c ch-or-conn
           channels (-> @(:state c) :channels)]
+      (conn/set-auth-token! c token)
       (doseq [[topic cs] channels
               :when (= :joined (:state cs))]
         (send-access-token! c topic token))
@@ -309,6 +352,7 @@
     (let [c (:conn ch-or-conn)
           topic (:topic ch-or-conn)
           cs (conn/channel-state c topic)]
+      (conn/set-auth-token! c token)
       (when (= :joined (:state cs))
         (send-access-token! c topic token))
       ch-or-conn)

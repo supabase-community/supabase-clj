@@ -212,6 +212,66 @@
       (is (some? @sync-fired))
       (finally (conn/disconnect conn)))))
 
+(deftest presence-diff-collapses-update-by-ref
+  (testing "a join carrying phx_ref_prev plus the matching leave collapses
+            to a single meta instead of duplicating the member"
+    (let [[conn rt] (connect-test)]
+      (try
+        ((:open rt))
+        (conn/upsert-channel! conn "realtime:r" {})
+        (conn/update-channel! conn "realtime:r" assoc
+                              :presence {:user1 {:metas [{:phx_ref "r1" :status "online"}]}})
+        ((:feed rt) (proto/encode
+                     {:topic "realtime:r"
+                      :event "presence_diff"
+                      :payload {:joins {:user1 {:metas [{:phx_ref "r2"
+                                                         :phx_ref_prev "r1"
+                                                         :status "away"}]}}
+                                :leaves {:user1 {:metas [{:phx_ref "r1"
+                                                          :status "online"}]}}}}))
+        (is (= {:user1 {:metas [{:phx_ref "r2" :phx_ref_prev "r1" :status "away"}]}}
+               (:presence (conn/channel-state conn "realtime:r"))))
+        (finally (conn/disconnect conn))))))
+
+(deftest presence-diff-preserves-other-refs-on-leave
+  (testing "one device leaving keeps the remaining metas of the key"
+    (let [[conn rt] (connect-test)
+          feed-diff (fn [joins leaves]
+                      ((:feed rt) (proto/encode
+                                   {:topic "realtime:r"
+                                    :event "presence_diff"
+                                    :payload {:joins joins :leaves leaves}})))]
+      (try
+        ((:open rt))
+        (conn/upsert-channel! conn "realtime:r" {})
+        (conn/update-channel! conn "realtime:r" assoc
+                              :presence {:user1 {:metas [{:phx_ref "d1"}]}})
+        (feed-diff {:user1 {:metas [{:phx_ref "d2"}]}} {})
+        (is (= [{:phx_ref "d1"} {:phx_ref "d2"}]
+               (get-in (conn/channel-state conn "realtime:r")
+                       [:presence :user1 :metas])))
+        (feed-diff {} {:user1 {:metas [{:phx_ref "d2"}]}})
+        (is (= [{:phx_ref "d1"}]
+               (get-in (conn/channel-state conn "realtime:r")
+                       [:presence :user1 :metas])))
+        (feed-diff {} {:user1 {:metas [{:phx_ref "d1"}]}})
+        (is (not (contains? (:presence (conn/channel-state conn "realtime:r"))
+                            :user1)))
+        (finally (conn/disconnect conn))))))
+
+(deftest presence-diff-leave-for-unknown-key-is-noop
+  (let [[conn rt] (connect-test)]
+    (try
+      ((:open rt))
+      (conn/upsert-channel! conn "realtime:r" {})
+      ((:feed rt) (proto/encode
+                   {:topic "realtime:r"
+                    :event "presence_diff"
+                    :payload {:joins {}
+                              :leaves {:ghost {:metas [{:phx_ref "g1"}]}}}}))
+      (is (= {} (:presence (conn/channel-state conn "realtime:r"))))
+      (finally (conn/disconnect conn)))))
+
 ;; ---------------------------------------------------------------------------
 ;; phx_error invokes on-error
 ;; ---------------------------------------------------------------------------
@@ -421,4 +481,24 @@
       (let [rejoin (proto/parse-frame (last @(:sent rt)))]
         (is (= "phx_join" (:event rejoin)))
         (is (= "tok-3" (get-in rejoin [:payload :access_token]))))
+      (finally (conn/disconnect conn)))))
+
+;; ---------------------------------------------------------------------------
+;; resolve-token + set-auth-token!
+;; ---------------------------------------------------------------------------
+
+(deftest resolve-token-prefers-set-auth-token-over-client-key
+  (let [[conn _rt] (connect-test)]
+    (try
+      (conn/set-auth-token! conn "manual-tok")
+      (is (= "manual-tok" (conn/resolve-token conn)))
+      (conn/set-auth-token! conn nil)
+      (is (= "anon-key" (conn/resolve-token conn)))
+      (finally (conn/disconnect conn)))))
+
+(deftest access-token-fn-wins-over-set-auth-token
+  (let [[conn _rt] (connect-test {:access-token-fn (constantly "fn-tok")})]
+    (try
+      (conn/set-auth-token! conn "manual-tok")
+      (is (= "fn-tok" (conn/resolve-token conn)))
       (finally (conn/disconnect conn)))))

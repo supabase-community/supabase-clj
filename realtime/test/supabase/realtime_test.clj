@@ -92,6 +92,57 @@
           (is (= 2 (count bindings)))
           (is (= :broadcast (:type (first bindings)))))))))
 
+(deftest on-ignores-duplicate-postgres-binding
+  (let [rt (recording-transport)
+        errs (atom [])
+        conn (rt/connect test-client {:transport-factory (:factory rt)
+                                      :heartbeat-ms 60000
+                                      :on-error #(swap! errs conj %)})]
+    (try
+      (let [ch (rt/channel conn "r")
+            cb1 (fn [_] :first)
+            cb2 (fn [_] :second)
+            f {:event :insert :schema "public" :table "u"}]
+        (is (= ch (rt/on ch :postgres-changes f cb1)))
+        (is (= ch (rt/on ch :postgres-changes f cb2)))
+        (let [bindings (:bindings (conn/channel-state conn "realtime:r"))]
+          (is (= 1 (count bindings)))
+          (is (= cb1 (:callback (first bindings)))))
+        (is (= 1 (count @errs)))
+        (is (= :duplicate-binding (:supabase/code (first @errs)))))
+      (finally (rt/disconnect conn)))))
+
+(deftest on-keeps-distinct-postgres-bindings
+  (with-conn
+    (fn [conn _]
+      (let [ch (rt/channel conn "r")
+            base {:event :insert :schema "public" :table "u"}]
+        (rt/on ch :postgres-changes base identity)
+        (rt/on ch :postgres-changes (assoc base :event :update) identity)
+        (rt/on ch :postgres-changes (assoc base :schema "private") identity)
+        (rt/on ch :postgres-changes (assoc base :table "v") identity)
+        (rt/on ch :postgres-changes (assoc base :filter "id=eq.1") identity)
+        (is (= 5 (count (:bindings (conn/channel-state conn "realtime:r")))))))))
+
+(deftest on-duplicate-detection-normalizes-event
+  (testing "* and :all collapse to the same filter"
+    (with-conn
+      (fn [conn _]
+        (let [ch (rt/channel conn "r")]
+          (rt/on ch :postgres-changes
+                 {:event "*" :schema "public" :table "u"} identity)
+          (rt/on ch :postgres-changes
+                 {:event :all :schema "public" :table "u"} identity)
+          (is (= 1 (count (:bindings (conn/channel-state conn "realtime:r"))))))))))
+
+(deftest on-does-not-dedupe-broadcast-bindings
+  (with-conn
+    (fn [conn _]
+      (let [ch (rt/channel conn "r")]
+        (rt/on ch :broadcast {:event "x"} identity)
+        (rt/on ch :broadcast {:event "x"} identity)
+        (is (= 2 (count (:bindings (conn/channel-state conn "realtime:r")))))))))
+
 ;; ---------------------------------------------------------------------------
 ;; subscribe sends phx_join
 ;; ---------------------------------------------------------------------------
@@ -271,6 +322,29 @@
           (let [f (last-sent-frame rt)]
             (is (= "access_token" (:event f)))
             (is (= "new-token" (get-in f [:payload :access_token])))))))))
+
+(deftest set-auth-token-flows-into-later-joins
+  (with-conn
+    (fn [conn rt]
+      ((:open rt))
+      (rt/set-auth conn "user-jwt")
+      (let [ch (rt/channel conn "r")]
+        (rt/subscribe ch)
+        (is (= "user-jwt" (get-in (last-sent-frame rt) [:payload :access_token])))))))
+
+(deftest set-auth-nil-clears-stale-join-token
+  (testing "after sign-out a later join carries no stale token"
+    (with-conn
+      (fn [conn rt]
+        ((:open rt))
+        (rt/set-auth conn "user-jwt")
+        (let [ch (rt/channel conn "r")]
+          (rt/subscribe ch)
+          (is (= "user-jwt" (get-in (last-sent-frame rt) [:payload :access_token]))))
+        (rt/set-auth conn nil)
+        (let [ch2 (rt/channel conn "r2")]
+          (rt/subscribe ch2)
+          (is (= "anon-key" (get-in (last-sent-frame rt) [:payload :access_token]))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; presence-state read

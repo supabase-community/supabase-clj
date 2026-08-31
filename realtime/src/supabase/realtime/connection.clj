@@ -50,22 +50,32 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- resolve-token*
-  "Calls `access-token-fn` (guarding exceptions); a string result wins,
-  otherwise falls back to the client's `:access-token` then `:api-key`."
-  [client access-token-fn]
-  (or (when access-token-fn
-        (try (let [v (access-token-fn)]
-               (when (string? v) v))
-             (catch Throwable _ nil)))
-      (:access-token client)
-      (:api-key client)))
+  "Calls `access-token-fn` (guarding exceptions); returns the string result
+  or nil."
+  [access-token-fn]
+  (when access-token-fn
+    (try (let [v (access-token-fn)]
+           (when (string? v) v))
+         (catch Throwable _ nil))))
 
 (defn resolve-token
   "Resolves the bearer token for `conn`: the `:access-token-fn` result when
-  supplied and successful, falling back to the client token on exception or
-  non-string result."
+  supplied and successful, then the last token set via `set-auth` (cleared
+  on sign-out), then the client's `:access-token`, then `:api-key`."
   [conn]
-  (resolve-token* (:client conn) (:access-token-fn conn)))
+  (or (resolve-token* (:access-token-fn conn))
+      (:auth-token @(:state conn))
+      (:access-token (:client conn))
+      (:api-key (:client conn))))
+
+(defn set-auth-token!
+  "Records `token` as the connection's current auth token (nil clears it,
+  e.g. on sign-out). Later channel joins and reconnect rejoins resolve the
+  token via `resolve-token`, so a cleared token no longer leaks into join
+  payloads. Mirrors realtime-js updating the join payload on auth change."
+  [conn token]
+  (swap! (:state conn) assoc :auth-token token)
+  nil)
 
 (defn- upgrade-headers
   "Builds WS upgrade headers for `conn`. Called per dial attempt so a
@@ -128,6 +138,7 @@
    :channels {}
    :send-buf []
    :transport nil
+   :auth-token nil
    :reconnect-attempts 0
    :closing? false})
 
@@ -347,10 +358,49 @@
      (partial presence-event-binding-match? :sync)
      payload)))
 
-(defn- merge-presence-diff [presence joins leaves]
-  (as-> presence p
-    (apply dissoc p (map name (keys leaves)))
-    (merge p joins)))
+(defn- merge-presence-joins
+  "Merges `joins` into `presence` per key: the join's metas win, and current
+  metas whose `:phx_ref` is not replaced are kept (phoenix
+  `Presence.syncDiff` join semantics)."
+  [presence joins]
+  (reduce-kv
+   (fn [state k new-presence]
+     (let [current (get state k)
+           new-metas (vec (:metas new-presence))
+           metas (if current
+                   (let [joined-refs (set (map :phx_ref new-metas))
+                         kept (remove #(contains? joined-refs (:phx_ref %))
+                                      (:metas current))]
+                     (into (vec kept) new-metas))
+                   new-metas)]
+       (assoc state k (assoc new-presence :metas metas))))
+   presence
+   joins))
+
+(defn- merge-presence-leaves
+  "Removes metas whose `:phx_ref` appears in `leaves`; drops keys left with
+  no metas (phoenix `Presence.syncDiff` leave semantics)."
+  [presence leaves]
+  (reduce-kv
+   (fn [state k left]
+     (if-let [current (get state k)]
+       (let [refs (set (map :phx_ref (:metas left)))
+             remaining (vec (remove #(contains? refs (:phx_ref %))
+                                    (:metas current)))]
+         (if (empty? remaining)
+           (dissoc state k)
+           (assoc state k (assoc current :metas remaining))))
+       state))
+   presence
+   leaves))
+
+(defn- merge-presence-diff
+  "Applies a presence diff to the stored state, matching metas by their
+  `:phx_ref` so one device's join/leave never disturbs the others."
+  [presence joins leaves]
+  (-> presence
+      (merge-presence-joins joins)
+      (merge-presence-leaves leaves)))
 
 (defn- handle-presence-diff [conn frame]
   (let [topic (:topic frame)
@@ -560,8 +610,9 @@
                                   Called for the initial upgrade and re-resolved
                                   at every reconnect and channel (re)join, so a
                                   refreshed token is picked up. On exception or
-                                  non-string result, falls back to the client's
-                                  `:access-token` then `:api-key`.
+                                  non-string result, falls back to the token set
+                                  via `set-auth`, then the client's
+                                  `:access-token`, then `:api-key`.
     - `:http-fallback?`         — send plain broadcasts over HTTP POST when the
                                   socket is not `:open` (default false). See
                                   `supabase.realtime/broadcast`.
