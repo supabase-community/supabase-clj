@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.2.0...postgrest-v1.3.0) (2026-08-31)
+
+
+### Features
+
+* **postgrest:** strip-nulls, retries default on for idempotent GET ([484ea33](https://github.com/supabase-community/supabase-clj/commit/484ea33b983f9d33989293e70bcebab2281e550d))
+
 ## [1.2.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.1.0...postgrest-v1.2.0) (2026-07-28)
 
 
