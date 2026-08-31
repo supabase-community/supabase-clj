@@ -6,6 +6,7 @@
             [supabase.core.transport :as transport]
             [supabase.realtime :as rt]
             [supabase.realtime.connection :as conn]
+            [supabase.realtime.filters :as f]
             [supabase.realtime.protocol :as proto])
   (:import (java.util.concurrent CompletableFuture)))
 
@@ -142,6 +143,57 @@
         (rt/on ch :broadcast {:event "x"} identity)
         (rt/on ch :broadcast {:event "x"} identity)
         (is (= 2 (count (:bindings (conn/channel-state conn "realtime:r")))))))))
+
+(deftest on-serializes-filter-builder
+  (with-conn
+    (fn [conn _]
+      (let [ch (rt/channel conn "r")]
+        (rt/on ch :postgres-changes
+               {:event :update :schema "public" :table "orders"
+                :filter (-> (f/gt "amount" 100) (f/eq "status" "open"))}
+               identity)
+        (let [binding (first (:bindings (conn/channel-state conn "realtime:r")))]
+          (is (= "amount=gt.100,status=eq.open"
+                 (get-in binding [:filter :filter]))))))))
+
+(deftest on-builder-and-string-filters-dedupe
+  (with-conn
+    (fn [conn _]
+      (let [ch (rt/channel conn "r")]
+        (rt/on ch :postgres-changes
+               {:event :update :schema "public" :table "orders"
+                :filter (f/gt "amount" 100)}
+               identity)
+        (rt/on ch :postgres-changes
+               {:event :update :schema "public" :table "orders"
+                :filter "amount=gt.100"}
+               identity)
+        (is (= 1 (count (:bindings (conn/channel-state conn "realtime:r")))))))))
+
+(deftest on-duplicate-detection-includes-select
+  (with-conn
+    (fn [conn _]
+      (let [ch (rt/channel conn "r")
+            base {:event :insert :schema "public" :table "u"}]
+        (rt/on ch :postgres-changes (assoc base :select ["id"]) identity)
+        (rt/on ch :postgres-changes (assoc base :select ["id"]) identity)
+        (rt/on ch :postgres-changes (assoc base :select ["id" "email"]) identity)
+        (rt/on ch :postgres-changes base identity)
+        (is (= 3 (count (:bindings (conn/channel-state conn "realtime:r")))))))))
+
+(deftest on-select-flows-into-join-frame
+  (with-conn
+    (fn [conn rt]
+      ((:open rt))
+      (let [ch (rt/channel conn "r")]
+        (rt/on ch :postgres-changes
+               {:event :insert :schema "public" :table "u"
+                :select ["id" "email"]}
+               identity)
+        (rt/subscribe ch))
+      (let [pg (first (get-in (last-sent-frame rt)
+                              [:payload :config :postgres_changes]))]
+        (is (= ["id" "email"] (:select pg)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; subscribe sends phx_join

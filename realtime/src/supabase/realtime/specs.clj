@@ -48,13 +48,16 @@
   (m/schema [:enum :insert :update :delete :all "*"]))
 
 (def PostgresFilter
-  "Schema for a postgres_changes binding filter."
+  "Schema for a postgres_changes binding filter. `:filter` is a wire string
+  (builders are serialized by `supabase.realtime/on` before validation);
+  `:select` narrows the payload columns."
   (m/schema [:map
              {:closed true}
              [:event :keyword]
              [:schema :string]
              [:table  :string]
-             [:filter {:optional true} :string]]))
+             [:filter {:optional true} :string]
+             [:select {:optional true} [:vector :string]]]))
 
 (def BroadcastFilter
   (m/schema [:map

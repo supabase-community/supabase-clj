@@ -62,9 +62,10 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- postgres-binding-payload [binding]
-  (let [{:keys [event schema table filter]} (:filter binding)]
+  (let [{:keys [event schema table filter select]} (:filter binding)]
     (cond-> {:event (name event) :schema schema :table table}
-      filter (assoc :filter filter))))
+      filter (assoc :filter filter)
+      select (assoc :select select))))
 
 (defn join-frame
   "Builds a `phx_join` frame for `topic` with the given channel `config`

@@ -34,10 +34,12 @@
 
   Out (deferred): broadcast ack/wait_for_ack, HTTP fallback,
        binary v2 protocol."
+  (:refer-clojure :exclude [not])
   (:require [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.core.http :as http]
             [supabase.realtime.connection :as conn]
+            [supabase.realtime.filters :as filters]
             [supabase.realtime.protocol :as proto]
             [supabase.realtime.specs :as specs]))
 
@@ -75,7 +77,7 @@
   ([conn topic] (channel conn topic {}))
   ([conn topic opts]
    (cond
-     (not (valid-conn? conn))
+     (clojure.core/not (valid-conn? conn))
      (error/anomaly :cognitect.anomalies/incorrect
                     {:cognitect.anomalies/message "Invalid connection"
                      :supabase/service :realtime})
@@ -97,13 +99,27 @@
 (defn- normalize-postgres-filter [filter]
   (update filter :event #(if (= "*" %) :all (keyword %))))
 
+(defn- serialize-builder
+  "Converts a `supabase.realtime.filters` builder (a vector of condition
+  strings) in a postgres_changes filter map into its wire string. Raw
+  string filters pass through untouched."
+  [filter]
+  (if (vector? (:filter filter))
+    (update filter :filter filters/build)
+    filter))
+
+(defn- select-key [filter]
+  (some-> (:select filter) vec))
+
 (defn- same-postgres-filter?
   "True when two postgres_changes filters would be collapsed into a single
-  server subscription: equal event, schema, table, and filter (absent and
-  nil treated alike). Mirrors realtime-js `isSamePostgresFilter`."
+  server subscription: equal event, schema, table, filter (absent and nil
+  treated alike), and select column list. Mirrors realtime-js
+  `isSamePostgresFilter`."
   [a b]
-  (= ((juxt :event :schema :table :filter) a)
-     ((juxt :event :schema :table :filter) b)))
+  (and (= ((juxt :event :schema :table :filter) a)
+          ((juxt :event :schema :table :filter) b))
+       (= (select-key a) (select-key b))))
 
 (defn- duplicate-postgres-binding?
   "True when channel `topic` already holds a postgres_changes binding with
@@ -121,42 +137,57 @@
   Binding types:
     :postgres-changes  — filter `{:event :insert/:update/:delete/:all
                                   :schema \"public\" :table \"users\"
-                                  :filter \"id=eq.42\" (optional)}`
+                                  :filter \"id=eq.42\" (optional)
+                                  :select [\"id\" \"email\"] (optional)}`
     :broadcast         — filter `{:event \"typing\"}` (use `\"*\"` for all)
     :presence          — filter `{:event :sync | :join | :leave}`
 
-  Registering the same postgres_changes filter twice is a no-op (the
-  duplicate is dropped and the connection's `:on-error` is notified with a
-  `:duplicate-binding` anomaly): the server collapses identical filters
-  into one subscription, so keeping the duplicate would desync client and
-  server binding lists and fail `subscribe` with a mismatch.
+  The postgres_changes `:filter` also accepts a builder from
+  `supabase.realtime.filters` — it is serialized to its wire string at
+  registration time:
+
+      (rt/on ch :postgres-changes
+             {:event :update :schema \"public\" :table \"orders\"
+              :filter (-> (f/gt \"amount\" 100) (f/eq \"status\" \"open\"))}
+             handle-order)
+
+  `:select` narrows the payload to the listed columns (the primary key
+  always comes through). Registering the same postgres_changes filter twice
+  is a no-op (the duplicate is dropped and the connection's `:on-error` is
+  notified with a `:duplicate-binding` anomaly): the server collapses
+  identical filters into one subscription, so keeping the duplicate would
+  desync client and server binding lists and fail `subscribe` with a
+  mismatch.
 
   Must be called BEFORE `subscribe` for postgres_changes — server-side
   binding ids are correlated at join time."
   [ch binding-type filter callback]
-  (or (specs/ensure-filter binding-type filter)
-      (let [filter' (if (= :postgres-changes binding-type)
-                      (normalize-postgres-filter filter)
-                      filter)
+  (let [filter (if (= :postgres-changes binding-type)
+                 (serialize-builder filter)
+                 filter)]
+    (or (specs/ensure-filter binding-type filter)
+        (let [filter' (if (= :postgres-changes binding-type)
+                        (normalize-postgres-filter filter)
+                        filter)
             binding {:type binding-type
                      :filter filter'
                      :callback callback}
-            c (:conn ch)
-            topic (:topic ch)]
-        (if (and (= :postgres-changes binding-type)
-                 (duplicate-postgres-binding? c topic filter'))
-          (do (when-let [f (:on-error c)]
-                (f (error/anomaly :cognitect.anomalies/incorrect
-                                  {:cognitect.anomalies/message
-                                   (str "duplicate postgres-changes binding for "
-                                        topic " ignored")
-                                   :supabase/service :realtime
-                                   :supabase/code :duplicate-binding
-                                   :realtime/topic topic
-                                   :realtime/filter filter'})))
-              ch)
-          (do (conn/add-binding! c topic binding)
-              ch)))))
+              c (:conn ch)
+              topic (:topic ch)]
+          (if (and (= :postgres-changes binding-type)
+                   (duplicate-postgres-binding? c topic filter'))
+            (do (when-let [f (:on-error c)]
+                  (f (error/anomaly :cognitect.anomalies/incorrect
+                                    {:cognitect.anomalies/message
+                                     (str "duplicate postgres-changes binding for "
+                                          topic " ignored")
+                                     :supabase/service :realtime
+                                     :supabase/code :duplicate-binding
+                                     :realtime/topic topic
+                                     :realtime/filter filter'})))
+                ch)
+            (do (conn/add-binding! c topic binding)
+                ch))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Lifecycle ops on a channel
@@ -361,3 +392,23 @@
     (error/anomaly :cognitect.anomalies/incorrect
                    {:cognitect.anomalies/message "set-auth requires a channel or connection"
                     :supabase/service :realtime})))
+
+;; ---------------------------------------------------------------------------
+;; Re-exports — postgres_changes filter builder (supabase.realtime.filters)
+;; ---------------------------------------------------------------------------
+
+(def eq         filters/eq)
+(def neq        filters/neq)
+(def lt         filters/lt)
+(def lte        filters/lte)
+(def gt         filters/gt)
+(def gte        filters/gte)
+(def in         filters/in)
+(def like       filters/like)
+(def ilike      filters/ilike)
+(def match      filters/match)
+(def imatch     filters/imatch)
+(def is         filters/is)
+(def isdistinct filters/isdistinct)
+(def not        filters/not)
+(def build      filters/build)
