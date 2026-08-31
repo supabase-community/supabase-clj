@@ -4,5 +4,5 @@
   "storage": "0.4.0",
   "realtime": "1.3.0",
   "postgrest": "1.2.0",
-  "functions": "0.1.0"
+  "functions": "0.1.1"
 }
