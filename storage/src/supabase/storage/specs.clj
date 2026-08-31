@@ -29,6 +29,35 @@
              [:allowed-mime-types {:optional true} [:maybe [:vector :string]]]
              [:type {:optional true} [:maybe #'BucketType]]]))
 
+(def ^:private BucketSortColumn
+  (m/schema [:enum "id" "name" "created_at" "updated_at"
+             :id :name :created-at :updated-at]))
+
+(def BucketSortBy
+  "Schema for list-buckets `:sort-by`. Column keywords may be kebab-case
+  (`:created-at`); they are rendered snake_case on the wire."
+  (m/schema [:map
+             {:closed true}
+             [:column {:optional true} #'BucketSortColumn]
+             [:order {:optional true} [:enum "asc" "desc" :asc :desc]]]))
+
+(def ListBucketsOptions
+  "Schema for list-buckets options. All fields optional."
+  (m/schema [:map
+             {:closed true}
+             [:limit {:optional true} :int]
+             [:offset {:optional true} :int]
+             [:sort-by {:optional true} #'BucketSortBy]
+             [:search {:optional true} :string]]))
+
+(def PurgeCacheOpts
+  "Schema for purge-cache and purge-bucket-cache options. Mirroring
+  storage-js, `:transformations` may only be true (omit it to purge all
+  cached versions)."
+  (m/schema [:map
+             {:closed true}
+             [:transformations {:optional true} [:= true]]]))
+
 (def Storage
   "Schema for a storage instance map produced by `from`."
   (m/schema [:map
@@ -101,12 +130,14 @@
   * `:response-as` — `:byte-array` (default) or `:stream`
   * `:range` — `[start end]` byte range (inclusive) for partial downloads
   * `:transform` — image transformation options (renders via render/image)
+  * `:cache-nonce` — value for the `cacheNonce` query param (cache busting)
   * `:headers` — extra request headers"
   (m/schema [:map
              {:closed true}
              [:response-as {:optional true} [:enum :byte-array :stream]]
              [:range {:optional true} [:tuple :int :int]]
              [:transform {:optional true} #'TransformOptions]
+             [:cache-nonce {:optional true} :string]
              [:headers {:optional true} [:map-of :string :string]]]))
 
 (def MoveCopyOpts

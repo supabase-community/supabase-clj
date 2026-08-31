@@ -67,6 +67,30 @@
       (str/replace #"^/+|/+$" "")
       (str/replace #"/+" "/")))
 
+(defn- encode-uri-component
+  "Percent-encodes `s` following encodeURIComponent semantics: unreserved
+  characters (A-Z a-z 0-9 - _ . ! ~ * ' ( )) stay literal, everything else
+  is UTF-8 percent-encoded."
+  [s]
+  (-> (URLEncoder/encode (str s) StandardCharsets/UTF_8)
+      (str/replace "+" "%20")
+      (str/replace "%21" "!")
+      (str/replace "%27" "'")
+      (str/replace "%28" "(")
+      (str/replace "%29" ")")
+      (str/replace "%7E" "~")))
+
+(defn- encode-storage-path
+  "Percent-encodes each `/`-delimited segment of `path` so URL delimiters
+  within a key (e.g. `?`, `#`) can't be read as querystring/fragment
+  starts. Separators stay literal — the server routes on them and decodes
+  each segment back to the original key. Mirrors storage-js
+  `encodeStoragePath`."
+  [path]
+  (->> (str/split path #"/")
+       (map encode-uri-component)
+       (str/join "/")))
+
 (defn- kw->str [v]
   (if (keyword? v) (name v) (str v)))
 
@@ -128,15 +152,40 @@
 ;; Bucket operations
 ;; ---------------------------------------------------------------------------
 
+(defn- bucket-sort-column [column]
+  (-> column kw->str (str/replace "-" "_")))
+
+(defn- list-buckets-query [opts]
+  (cond-> {}
+    (contains? opts :limit)          (assoc "limit" (str (:limit opts)))
+    (contains? opts :offset)         (assoc "offset" (str (:offset opts)))
+    (:search opts)                   (assoc "search" (:search opts))
+    (get-in opts [:sort-by :column]) (assoc "sortColumn" (bucket-sort-column
+                                                          (get-in opts [:sort-by :column])))
+    (get-in opts [:sort-by :order])  (assoc "sortOrder" (kw->str
+                                                         (get-in opts [:sort-by :order])))))
+
 (defn list-buckets
-  "Lists all buckets in the project."
-  [client]
-  (or (client/ensure-client client)
-      (-> (http/request client)
-          (http/with-method :get)
-          (http/with-service-url :storage-url (bucket-path))
-          (with-storage-errors)
-          (http/execute))))
+  "Lists all buckets in the project.
+
+  ## Options
+
+  * `:limit` — max buckets returned
+  * `:offset` — number of buckets to skip
+  * `:sort-by` — `{:column \"name\" :order \"asc\"}`; column is one of
+    `\"id\"`, `\"name\"`, `\"created_at\"`, `\"updated_at\"` (kebab-case
+    keywords accepted)
+  * `:search` — substring filter on bucket names"
+  ([client] (list-buckets client {}))
+  ([client opts]
+   (or (client/ensure-client client)
+       (specs/ensure-valid specs/ListBucketsOptions opts)
+       (-> (http/request client)
+           (http/with-method :get)
+           (http/with-service-url :storage-url (bucket-path))
+           (http/with-query (list-buckets-query opts))
+           (with-storage-errors)
+           (http/execute)))))
 
 (defn get-bucket
   "Retrieves a bucket by its `id`."
@@ -204,6 +253,35 @@
           (http/with-service-url :storage-url (bucket-path id))
           (with-storage-errors)
           (http/execute))))
+
+(defn- purge-cache-query
+  "Renders purge-cache options as a query string (no leading `?`), or nil."
+  [opts]
+  (when (:transformations opts)
+    "transformations=true"))
+
+(defn purge-bucket-cache
+  "Purges the CDN cache for an entire bucket (`DELETE /cdn/{bucket}`). The
+  server issues a CDN invalidation and returns `{:message \"success\"}`.
+
+  Requires the service-role key — the endpoint rejects anon and user JWTs.
+  On self-hosted Storage the `purgeCache` tenant feature must be enabled.
+
+  ## Options
+
+  * `:transformations` — when true, purges only transformed variants
+    (resized/formatted), leaving original cached files intact"
+  ([client id] (purge-bucket-cache client id {}))
+  ([client id opts]
+   (or (client/ensure-client client)
+       (specs/ensure-valid specs/PurgeCacheOpts opts)
+       (-> (http/request client)
+           (http/with-method :delete)
+           (http/with-service-url :storage-url
+             (append-query (str "/cdn/" (encode-storage-path id))
+                           (purge-cache-query opts)))
+           (with-storage-errors)
+           (http/execute)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Storage instance
@@ -298,6 +376,30 @@
             (with-storage-errors)
             (http/with-body {:prefixes prefixes})
             (http/execute)))))
+
+(defn purge-cache
+  "Purges the CDN cache for a single object
+  (`DELETE /cdn/{bucket}/{path}`). No wildcard or recursion: `path` must be
+  the exact object key. Requires the service-role key (see
+  `purge-bucket-cache`).
+
+  ## Options
+
+  * `:transformations` — when true, purges only transformed variants
+    (resized/formatted), leaving the original cached file intact"
+  ([s path] (purge-cache s path {}))
+  ([s path opts]
+   (or (specs/ensure-storage s)
+       (specs/ensure-valid specs/PurgeCacheOpts opts)
+       (let [{:keys [client bucket-id]} s
+             full-path (str bucket-id "/" (clean-path path))]
+         (-> (http/request client)
+             (http/with-method :delete)
+             (http/with-service-url :storage-url
+               (append-query (str "/cdn/" (encode-storage-path full-path))
+                             (purge-cache-query opts)))
+             (with-storage-errors)
+             (http/execute))))))
 
 (defn move
   "Moves an object within or across buckets.
@@ -592,6 +694,13 @@
     (str "/render/image/authenticated/" bucket-id "/" cleaned)
     (str "/object/authenticated/" bucket-id "/" cleaned)))
 
+(defn- cache-nonce->query
+  "Renders the cache-nonce download option as a query fragment, or nil.
+  Appending a nonce invalidates cached CDN copies of the object."
+  [cache-nonce]
+  (when cache-nonce
+    (str "cacheNonce=" (URLEncoder/encode (str cache-nonce) StandardCharsets/UTF_8))))
+
 (defn download
   "Downloads the object at `path` from a private bucket.
 
@@ -604,6 +713,7 @@
   * `:response-as` — `:byte-array` (default) or `:stream`
   * `:range` — `[start end]` inclusive byte range for a partial download
   * `:transform` — image transform map (renders via render/image)
+  * `:cache-nonce` — value for the `cacheNonce` query param (cache busting)
   * `:headers` — extra request headers"
   ([s path] (download s path {}))
   ([s path opts]
@@ -616,7 +726,10 @@
              [rstart rend] (:range opts)
              range-header (when (:range opts)
                             {"range" (str "bytes=" rstart "-" rend)})
-             query (transform->query transform)]
+             query (->> [(transform->query transform)
+                         (cache-nonce->query (:cache-nonce opts))]
+                        (filter some?)
+                        (str/join "&"))]
          (cond-> (http/request client)
            true (http/with-method :get)
            true (http/with-service-url :storage-url

@@ -112,6 +112,88 @@
     (is (= (str storage-url "/bucket/avatars") (:url req)))))
 
 ;; ---------------------------------------------------------------------------
+;; list-buckets options
+;; ---------------------------------------------------------------------------
+
+(deftest list-buckets-options-test
+  (let [[_ req] (run-with-capture
+                 #(storage/list-buckets test-client
+                                        {:limit 10
+                                         :offset 5
+                                         :sort-by {:column :created-at :order :desc}
+                                         :search "prod"}))]
+    (is (= :get (:method req)))
+    (is (= (str storage-url "/bucket") (:url req)))
+    (is (= {"limit" "10"
+            "offset" "5"
+            "search" "prod"
+            "sortColumn" "created_at"
+            "sortOrder" "desc"}
+           (:query req)))))
+
+(deftest list-buckets-no-options-test
+  (let [[_ req] (run-with-capture #(storage/list-buckets test-client))]
+    (is (empty? (:query req)))))
+
+(deftest list-buckets-invalid-opts-test
+  (is (error/anomaly? (storage/list-buckets test-client {:bogus 1})))
+  (is (error/anomaly? (storage/list-buckets test-client
+                                            {:sort-by {:column "bogus"}}))))
+
+;; ---------------------------------------------------------------------------
+;; purge-cache
+;; ---------------------------------------------------------------------------
+
+(deftest purge-bucket-cache-request-test
+  (let [[_ req] (run-with-capture
+                 #(storage/purge-bucket-cache test-client "avatars"))]
+    (is (= :delete (:method req)))
+    (is (= (str storage-url "/cdn/avatars") (:url req)))))
+
+(deftest purge-bucket-cache-transformations-test
+  (let [[_ req] (run-with-capture
+                 #(storage/purge-bucket-cache test-client "avatars"
+                                              {:transformations true}))]
+    (is (= (str storage-url "/cdn/avatars?transformations=true") (:url req)))))
+
+(deftest purge-bucket-cache-encodes-key-test
+  (let [[_ req] (run-with-capture
+                 #(storage/purge-bucket-cache test-client "my?bucket"))]
+    (is (= (str storage-url "/cdn/my%3Fbucket") (:url req)))))
+
+(deftest purge-bucket-cache-invalid-client-test
+  (is (error/anomaly? (storage/purge-bucket-cache {} "id"))))
+
+(deftest purge-bucket-cache-invalid-opts-test
+  (is (error/anomaly?
+       (storage/purge-bucket-cache test-client "id" {:transformations false}))))
+
+(deftest purge-cache-request-test
+  (let [[_ req] (run-with-capture
+                 #(storage/purge-cache (valid-storage) "folder/a.png"))]
+    (is (= :delete (:method req)))
+    (is (= (str storage-url "/cdn/avatars/folder/a.png") (:url req)))))
+
+(deftest purge-cache-encodes-segments-test
+  (testing "URL delimiters are encoded, path separators stay literal"
+    (let [[_ req] (run-with-capture
+                   #(storage/purge-cache (valid-storage) "folder/a?b#c.png"))]
+      (is (= (str storage-url "/cdn/avatars/folder/a%3Fb%23c.png") (:url req))))))
+
+(deftest purge-cache-transformations-after-encoded-key-test
+  (let [[_ req] (run-with-capture
+                 #(storage/purge-cache (valid-storage) "folder/a?b.png"
+                                       {:transformations true}))]
+    (is (= (str storage-url "/cdn/avatars/folder/a%3Fb.png?transformations=true")
+           (:url req)))))
+
+(deftest purge-cache-invalid-storage-test
+  (is (error/anomaly? (storage/purge-cache {} "a.png"))))
+
+(deftest purge-cache-invalid-opts-test
+  (is (error/anomaly? (storage/purge-cache (valid-storage) "a.png" {:bogus 1}))))
+
+;; ---------------------------------------------------------------------------
 ;; from / clean-path / get-public-url — pure
 ;; ---------------------------------------------------------------------------
 
@@ -485,6 +567,23 @@
                  #(storage/download (valid-storage) "a.png"
                                     {:headers {"x-foo" "bar"}}))]
     (is (= "bar" (get-in req [:headers "x-foo"])))))
+
+(deftest download-cache-nonce-test
+  (let [[_ req] (run-with-capture
+                 #(storage/download (valid-storage) "a.png" {:cache-nonce "v2"}))]
+    (is (.contains (:url req) "cacheNonce=v2"))))
+
+(deftest download-cache-nonce-with-transform-test
+  (let [[_ req] (run-with-capture
+                 #(storage/download (valid-storage) "a.png"
+                                    {:transform {:width 50} :cache-nonce "abc"}))]
+    (is (.contains (:url req) "width=50"))
+    (is (.contains (:url req) "cacheNonce=abc"))))
+
+(deftest download-no-cache-nonce-test
+  (let [[_ req] (run-with-capture
+                 #(storage/download (valid-storage) "a.png"))]
+    (is (not (.contains (:url req) "cacheNonce")))))
 
 (deftest download-invalid-opts-test
   (is (error/anomaly? (storage/download (valid-storage) "a.png" {:bogus 1}))))
