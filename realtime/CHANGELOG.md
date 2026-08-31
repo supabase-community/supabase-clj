@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/supabase-community/supabase-clj/compare/realtime-v1.2.0...realtime-v1.3.0) (2026-08-31)
+
+
+### Features
+
+* **realtime:** postgres_changes filter builder, new operators, select columns ([3e7a83e](https://github.com/supabase-community/supabase-clj/commit/3e7a83e104b2515dd0dbda246ee2400d7adce2c2))
+
+
+### Bug Fixes
+
+* **realtime:** guard duplicate on bindings, clear stale auth on sign-out, preserve presence refs ([69678f8](https://github.com/supabase-community/supabase-clj/commit/69678f8624dee0d856103627f782814f9c372426))
+
 ## [1.2.0](https://github.com/supabase-community/supabase-clj/compare/realtime-v1.1.0...realtime-v1.2.0) (2026-07-28)
 
 

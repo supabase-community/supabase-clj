@@ -10,7 +10,7 @@ single multiplexed connection.
 ;; deps.edn
 {:deps
  {io.github.supabase-community/core {:mvn/version "1.0.0"}
-  io.github.supabase-community/realtime {:mvn/version "1.2.0"}}} ;; x-release-please-version
+  io.github.supabase-community/realtime {:mvn/version "1.3.0"}}} ;; x-release-please-version
 ```
 
 ## Quick Start

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.4.0...storage-v0.5.0) (2026-08-31)
+
+
+### Features
+
+* **storage:** purge-cache, list-buckets options, cache-nonce ([d1ca5c5](https://github.com/supabase-community/supabase-clj/commit/d1ca5c53ead3caf447f2e83952fbdfac7ebe1f04))
+
 ## [0.4.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.3.0...storage-v0.4.0) (2026-07-28)
 
 
