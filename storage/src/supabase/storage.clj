@@ -2,11 +2,15 @@
   "Object storage against Supabase Storage.
 
   Provides bucket CRUD plus per-bucket file operations (list, remove, move,
-  copy, info, exists?, public/signed URLs, upload, download). Per-bucket
-  ops take a storage instance returned by `from`. Analytics bucket
-  operations live in `supabase.storage.analytics`.
-  ops take a storage instance returned by `from`. Vector bucket, index, and
-  vector data operations live in `supabase.storage.vector`.
+  copy, info, exists?, public/signed URLs, upload, download), bucket
+  lifecycle policies (`get-bucket-lifecycle` / `update-bucket-lifecycle` /
+  `delete-bucket-lifecycle`), and object versioning (`:versioning-status`
+  on bucket create/update, `:version-id` on download/URL/info ops,
+  version-targeted `remove`/`move`/`copy`, version listing options on
+  `list-files`/`list-files-v2`). Per-bucket ops take a storage instance
+  returned by `from`. Analytics bucket operations live in
+  `supabase.storage.analytics`. Vector bucket, index, and vector data
+  operations live in `supabase.storage.vector`.
 
   ## Example
 
@@ -55,6 +59,8 @@
     (contains? attrs :public)             (assoc :public (:public attrs))
     (contains? attrs :file-size-limit)    (assoc :file_size_limit (:file-size-limit attrs))
     (contains? attrs :allowed-mime-types) (assoc :allowed_mime_types (:allowed-mime-types attrs))
+    (contains? attrs :versioning-status)  (assoc :versioning_status
+                                                 (-> attrs :versioning-status name str/upper-case))
     (contains? attrs :type)               (assoc :type (let [t (:type attrs)]
                                                          (if (keyword? t)
                                                            (-> t name str/upper-case)
@@ -119,6 +125,12 @@
   (if (seq query)
     (str url (if (str/includes? url "?") "&" "?") query)
     url))
+
+(defn- version-id->query
+  "Renders the `:version-id` option as a query fragment, or nil."
+  [version-id]
+  (when version-id
+    (str "versionId=" (URLEncoder/encode (str version-id) StandardCharsets/UTF_8))))
 
 (defn- metadata->header
   "Encodes a metadata map as the base64 JSON the Storage API expects in
@@ -205,7 +217,9 @@
   * `:public` — boolean visibility flag (default false)
   * `:file-size-limit` — max file size in bytes
   * `:allowed-mime-types` — vector of allowed MIME types or wildcards
-  * `:type` — `\"STANDARD\"` (default) or `\"ANALYTICS\"`"
+  * `:type` — `\"STANDARD\"` (default) or `\"ANALYTICS\"`
+  * `:versioning-status` — initial object versioning status, `\"DISABLED\"`
+    (default) or `\"ENABLED\"`"
   ([client id] (create-bucket client id {}))
   ([client id attrs]
    (or (client/ensure-client client)
@@ -223,7 +237,10 @@
 (defn update-bucket
   "Updates the bucket identified by `id` with `attrs`.
 
-  Same attributes as `create-bucket` (without `:id`)."
+  Same attributes as `create-bucket` (without `:id`). Note
+  `:versioning-status` here accepts `\"ENABLED\"` or `\"SUSPENDED\"` only —
+  there is no transition back to `\"DISABLED\"` once versioning has been
+  touched."
   [client id attrs]
   (or (client/ensure-client client)
       (specs/ensure-valid specs/BucketUpdate attrs)
@@ -284,6 +301,85 @@
            (http/execute)))))
 
 ;; ---------------------------------------------------------------------------
+;; Bucket lifecycle
+;; ---------------------------------------------------------------------------
+
+(defn- lifecycle-path
+  [id]
+  (str bucket-uri "/" (encode-storage-path id) "/lifecycle"))
+
+(defn- lifecycle-rule->wire
+  "Renders a kebab-case lifecycle rule into the shape the Storage API
+  expects."
+  [rule]
+  (let [nve (:noncurrent-version-expiration rule)]
+    (cond-> {:status (if (keyword? (:status rule))
+                       (str/capitalize (name (:status rule)))
+                       (:status rule))
+             :filter (:filter rule)
+             :noncurrentVersionExpiration
+             (cond-> {:noncurrentDays (:noncurrent-days nve)}
+               (contains? nve :newer-noncurrent-versions)
+               (assoc :newerNoncurrentVersions (:newer-noncurrent-versions nve)))}
+      (:id rule) (assoc :id (:id rule)))))
+
+(defn get-bucket-lifecycle
+  "Returns the lifecycle policy stored on bucket `id`.
+
+  Fails with `NoSuchLifecycleConfiguration` when the bucket has no policy.
+  The rules expire previous versions of objects, not the current one —
+  enable versioning or there is nothing for the policy to act on. Standard
+  buckets only; the server returns `FeatureNotEnabled` when lifecycle is
+  off for the project.
+
+      (get-bucket-lifecycle client \"avatars\")
+      ;; => {:rules [{:id \"expire-history\" :status \"Enabled\" :filter {}
+      ;;              :noncurrentVersionExpiration {:noncurrentDays 30}}]}"
+  [client id]
+  (or (client/ensure-client client)
+      (-> (http/request client)
+          (http/with-method :get)
+          (http/with-service-url :storage-url (lifecycle-path id))
+          (with-storage-errors)
+          (http/execute))))
+
+(defn update-bucket-lifecycle
+  "Replaces the lifecycle policy on bucket `id`. The `:rules` vector sent
+  is the whole policy: anything previously stored is overwritten. Call
+  `delete-bucket-lifecycle` to remove the policy.
+
+  Each rule supports only `:noncurrent-version-expiration` today;
+  `:filter` is required and must be `{}`. `:id` is optional — the server
+  generates one when omitted. Rule ids must be unique when set.
+
+      (update-bucket-lifecycle client \"avatars\"
+        {:rules [{:id \"expire-history\"
+                  :status :enabled
+                  :filter {}
+                  :noncurrent-version-expiration {:noncurrent-days 30
+                                                  :newer-noncurrent-versions 2}}]})"
+  [client id configuration]
+  (or (client/ensure-client client)
+      (specs/ensure-valid specs/LifecycleConfiguration configuration)
+      (-> (http/request client)
+          (http/with-method :put)
+          (http/with-service-url :storage-url (lifecycle-path id))
+          (with-storage-errors)
+          (http/with-body {:rules (mapv lifecycle-rule->wire (:rules configuration))})
+          (http/execute))))
+
+(defn delete-bucket-lifecycle
+  "Removes the lifecycle policy from bucket `id`. Safe to call when no
+  policy is stored; the response is still success."
+  [client id]
+  (or (client/ensure-client client)
+      (-> (http/request client)
+          (http/with-method :delete)
+          (http/with-service-url :storage-url (lifecycle-path id))
+          (with-storage-errors)
+          (http/execute))))
+
+;; ---------------------------------------------------------------------------
 ;; Storage instance
 ;; ---------------------------------------------------------------------------
 
@@ -303,10 +399,15 @@
 
 (defn- search-options-body [opts]
   (cond-> {}
-    (contains? opts :limit)   (assoc :limit (:limit opts))
-    (contains? opts :offset)  (assoc :offset (:offset opts))
-    (contains? opts :search)  (assoc :search (:search opts))
-    (contains? opts :sort-by) (assoc :sortBy (snake-keys (:sort-by opts)))))
+    (contains? opts :limit)               (assoc :limit (:limit opts))
+    (contains? opts :offset)              (assoc :offset (:offset opts))
+    (contains? opts :search)              (assoc :search (:search opts))
+    (contains? opts :sort-by)             (assoc :sortBy (snake-keys (:sort-by opts)))
+    (contains? opts :noncurrent-versions) (assoc :noncurrentVersions
+                                                 (kw->str (:noncurrent-versions opts)))
+    (contains? opts :delete-markers)      (assoc :deleteMarkers
+                                                 (kw->str (:delete-markers opts)))
+    (contains? opts :exact-match)         (assoc :exactMatch (:exact-match opts))))
 
 (defn list-files
   "Lists files in the bucket, optionally filtered by `prefix`.
@@ -316,7 +417,12 @@
   * `:limit` — max results (default server-side: 100)
   * `:offset` — pagination offset
   * `:sort-by` — `{:column \"name\" :order \"asc\"}`
-  * `:search` — substring filter"
+  * `:search` — substring filter
+  * `:noncurrent-versions` — `:exclude` (default), `:include` or `:only`;
+    controls whether noncurrent object versions appear in the results
+    (requires bucket versioning)
+  * `:delete-markers` — `:exclude` (default), `:include` or `:only`
+  * `:exact-match` — only objects whose key exactly matches `prefix`"
   ([s] (list-files s nil {}))
   ([s prefix] (list-files s prefix {}))
   ([s prefix opts]
@@ -333,9 +439,14 @@
 
 (defn- list-v2-body [opts]
   (cond-> {}
-    (contains? opts :limit)          (assoc :limit (:limit opts))
-    (contains? opts :cursor)         (assoc :cursor (:cursor opts))
-    (contains? opts :with-delimiter) (assoc :with_delimiter (:with-delimiter opts))))
+    (contains? opts :limit)               (assoc :limit (:limit opts))
+    (contains? opts :cursor)              (assoc :cursor (:cursor opts))
+    (contains? opts :with-delimiter)      (assoc :with_delimiter (:with-delimiter opts))
+    (contains? opts :noncurrent-versions) (assoc :noncurrentVersions
+                                                 (kw->str (:noncurrent-versions opts)))
+    (contains? opts :delete-markers)      (assoc :deleteMarkers
+                                                 (kw->str (:delete-markers opts)))
+    (contains? opts :exact-match)         (assoc :exactMatch (:exact-match opts))))
 
 (defn list-files-v2
   "Lists files using cursor-based pagination (the `list-v2` endpoint).
@@ -347,7 +458,12 @@
 
   * `:limit` — page size (default server-side 100)
   * `:cursor` — pagination cursor from a previous response
-  * `:with-delimiter` — group results by folder hierarchy when true"
+  * `:with-delimiter` — group results by folder hierarchy when true
+  * `:noncurrent-versions` — `:exclude` (default), `:include` or `:only`;
+    controls whether noncurrent object versions appear in the results
+    (requires bucket versioning)
+  * `:delete-markers` — `:exclude` (default), `:include` or `:only`
+  * `:exact-match` — only objects whose key exactly matches `prefix`"
   ([s] (list-files-v2 s nil {}))
   ([s prefix] (list-files-v2 s prefix {}))
   ([s prefix opts]
@@ -362,20 +478,32 @@
              (http/with-body body)
              (http/execute))))))
 
+(defn- remove-entry->wire
+  "A remove entry is a plain path (deletes the version currently at that
+  path) or `{:path :version-id}` (deletes an exact version, current or
+  archived)."
+  [entry]
+  (if (map? entry)
+    {:path (:path entry) :versionId (:version-id entry)}
+    entry))
+
 (defn remove
   "Deletes one or more objects from the bucket.
 
-  `paths` may be a single path string or a vector of paths."
+  `paths` may be a single path string or a vector. Each entry is either a
+  plain path or a `{:path ... :version-id ...}` map targeting an exact
+  object version (requires bucket versioning)."
   [s paths]
   (or (specs/ensure-storage s)
       (let [{:keys [client bucket-id]} s
             prefixes (if (coll? paths) (vec paths) [paths])]
-        (-> (http/request client)
-            (http/with-method :delete)
-            (http/with-service-url :storage-url (str "/object/" bucket-id))
-            (with-storage-errors)
-            (http/with-body {:prefixes prefixes})
-            (http/execute)))))
+        (or (specs/ensure-valid specs/RemovePaths prefixes)
+            (-> (http/request client)
+                (http/with-method :delete)
+                (http/with-service-url :storage-url (str "/object/" bucket-id))
+                (with-storage-errors)
+                (http/with-body {:prefixes (mapv remove-entry->wire prefixes)})
+                (http/execute))))))
 
 (defn purge-cache
   "Purges the CDN cache for a single object
@@ -408,16 +536,19 @@
 
   * `:from` — source path (required)
   * `:to` — destination path (required)
-  * `:destination-bucket` — target bucket id (optional, same bucket if omitted)"
+  * `:destination-bucket` — target bucket id (optional, same bucket if omitted)
+  * `:source-version-id` — move a specific version of the source object
+    instead of the current one (requires bucket versioning)"
   [s opts]
   (or (specs/ensure-storage s)
       (specs/ensure-valid specs/MoveCopyOpts opts)
       (let [{:keys [client bucket-id]} s
-            {:keys [from to destination-bucket]} opts
+            {:keys [from to destination-bucket source-version-id]} opts
             body (cond-> {:bucketId bucket-id
                           :sourceKey from
                           :destinationKey to}
-                   destination-bucket (assoc :destinationBucket destination-bucket))]
+                   destination-bucket (assoc :destinationBucket destination-bucket)
+                   source-version-id (assoc :sourceVersionId source-version-id))]
         (-> (http/request client)
             (http/with-method :post)
             (http/with-service-url :storage-url "/object/move")
@@ -431,11 +562,12 @@
   (or (specs/ensure-storage s)
       (specs/ensure-valid specs/MoveCopyOpts opts)
       (let [{:keys [client bucket-id]} s
-            {:keys [from to destination-bucket]} opts
+            {:keys [from to destination-bucket source-version-id]} opts
             body (cond-> {:bucketId bucket-id
                           :sourceKey from
                           :destinationKey to}
-                   destination-bucket (assoc :destinationBucket destination-bucket))]
+                   destination-bucket (assoc :destinationBucket destination-bucket)
+                   source-version-id (assoc :sourceVersionId source-version-id))]
         (-> (http/request client)
             (http/with-method :post)
             (http/with-service-url :storage-url "/object/copy")
@@ -444,17 +576,26 @@
             (http/execute)))))
 
 (defn info
-  "Retrieves metadata for the object at `path`."
-  [s path]
-  (or (specs/ensure-storage s)
-      (let [{:keys [client bucket-id]} s]
-        (-> (http/request client)
-            (http/with-method :get)
-            (http/with-service-url :storage-url
-              (str "/object/info/authenticated/"
-                   bucket-id "/" (clean-path path)))
-            (with-storage-errors)
-            (http/execute)))))
+  "Retrieves metadata for the object at `path`.
+
+  ## Options
+
+  * `:version-id` — metadata for a specific object version instead of the
+    current one (requires bucket versioning)"
+  ([s path] (info s path {}))
+  ([s path opts]
+   (or (specs/ensure-storage s)
+       (specs/ensure-valid specs/InfoOpts opts)
+       (let [{:keys [client bucket-id]} s]
+         (-> (http/request client)
+             (http/with-method :get)
+             (http/with-service-url :storage-url
+               (append-query
+                (str "/object/info/authenticated/"
+                     bucket-id "/" (clean-path path))
+                (version-id->query (:version-id opts))))
+             (with-storage-errors)
+             (http/execute))))))
 
 (defn exists?
   "Returns true if the object exists, false otherwise. Errors other than
@@ -487,7 +628,9 @@
   * `:download` — `true` triggers browser download with the object's name;
     a string sets a custom download filename.
   * `:transform` — image transform map; routes through the image render
-    endpoint and appends the transform query."
+    endpoint and appends the transform query.
+  * `:version-id` — URL for a specific object version instead of the
+    current one (requires bucket versioning)."
   ([s path] (get-public-url s path {}))
   ([s path opts]
    (or (specs/ensure-storage s)
@@ -497,8 +640,12 @@
              transform (:transform opts)
              render (if (seq transform) "render/image" "object")
              base (str (:storage-url client) "/" render "/public/" bucket-id "/" cleaned)
-             with-dl (append-download base (:download opts))]
-         (append-query with-dl (transform->query transform))))))
+             with-dl (append-download base (:download opts))
+             query (->> [(transform->query transform)
+                         (version-id->query (:version-id opts))]
+                        (filter some?)
+                        (str/join "&"))]
+         (append-query with-dl query)))))
 
 (defn- transform->body
   "Renders transform options into the body shape the sign endpoint
@@ -519,7 +666,9 @@
 
   * `:expires-in` — TTL in seconds (required)
   * `:download` — see `get-public-url`
-  * `:transform` — image transform map applied to the signed asset"
+  * `:transform` — image transform map applied to the signed asset
+  * `:version-id` — sign a specific object version instead of the current
+    one (requires bucket versioning)"
   [s path opts]
   (or (specs/ensure-storage s)
       (specs/ensure-valid specs/SignedUrlOpts opts)
@@ -527,7 +676,8 @@
             cleaned (clean-path path)
             transform (:transform opts)
             body (cond-> {:expiresIn (:expires-in opts)}
-                   (seq transform) (assoc :transform (transform->body transform)))
+                   (seq transform) (assoc :transform (transform->body transform))
+                   (:version-id opts) (assoc :versionId (:version-id opts)))
             resp (-> (http/request client)
                      (http/with-method :post)
                      (http/with-service-url :storage-url
@@ -714,6 +864,8 @@
   * `:range` — `[start end]` inclusive byte range for a partial download
   * `:transform` — image transform map (renders via render/image)
   * `:cache-nonce` — value for the `cacheNonce` query param (cache busting)
+  * `:version-id` — download a specific object version instead of the
+    current one (requires bucket versioning)
   * `:headers` — extra request headers"
   ([s path] (download s path {}))
   ([s path opts]
@@ -727,7 +879,8 @@
              range-header (when (:range opts)
                             {"range" (str "bytes=" rstart "-" rend)})
              query (->> [(transform->query transform)
-                         (cache-nonce->query (:cache-nonce opts))]
+                         (cache-nonce->query (:cache-nonce opts))
+                         (version-id->query (:version-id opts))]
                         (filter some?)
                         (str/join "&"))]
          (cond-> (http/request client)

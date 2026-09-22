@@ -613,6 +613,232 @@
   (is (error/anomaly? (storage/list-files-v2 (valid-storage) nil {:bogus 1}))))
 
 ;; ---------------------------------------------------------------------------
+;; Bucket versioning status
+;; ---------------------------------------------------------------------------
+
+(deftest create-bucket-versioning-status-test
+  (let [[_ req] (run-with-capture
+                 #(storage/create-bucket test-client "avatars"
+                                         {:versioning-status :enabled}))
+        body (parse-body req)]
+    (is (= "ENABLED" (get body "versioning_status")))))
+
+(deftest create-bucket-rejects-suspended-test
+  (testing "SUSPENDED is not settable at creation"
+    (is (error/anomaly? (storage/create-bucket test-client "avatars"
+                                               {:versioning-status :suspended})))))
+
+(deftest update-bucket-versioning-status-test
+  (let [[_ req] (run-with-capture
+                 #(storage/update-bucket test-client "avatars"
+                                         {:versioning-status "SUSPENDED"}))
+        body (parse-body req)]
+    (is (= "SUSPENDED" (get body "versioning_status")))))
+
+(deftest update-bucket-rejects-disabled-test
+  (testing "no transition back to DISABLED once versioning was touched"
+    (is (error/anomaly? (storage/update-bucket test-client "avatars"
+                                               {:versioning-status :disabled})))))
+
+;; ---------------------------------------------------------------------------
+;; Bucket lifecycle
+;; ---------------------------------------------------------------------------
+
+(deftest get-bucket-lifecycle-request-test
+  (let [[_ req] (run-with-capture
+                 #(storage/get-bucket-lifecycle test-client "avatars"))]
+    (is (= :get (:method req)))
+    (is (= (str storage-url "/bucket/avatars/lifecycle") (:url req)))))
+
+(deftest get-bucket-lifecycle-encodes-id-test
+  (let [[_ req] (run-with-capture
+                 #(storage/get-bucket-lifecycle test-client "my?bucket"))]
+    (is (= (str storage-url "/bucket/my%3Fbucket/lifecycle") (:url req)))))
+
+(deftest get-bucket-lifecycle-invalid-client-test
+  (is (error/anomaly? (storage/get-bucket-lifecycle {} "id"))))
+
+(def ^:private sample-rule
+  {:id "expire-history"
+   :status :enabled
+   :filter {}
+   :noncurrent-version-expiration {:noncurrent-days 30
+                                   :newer-noncurrent-versions 2}})
+
+(deftest update-bucket-lifecycle-request-test
+  (let [[_ req] (run-with-capture
+                 #(storage/update-bucket-lifecycle test-client "avatars"
+                                                   {:rules [sample-rule]}))
+        body (parse-body req)]
+    (is (= :put (:method req)))
+    (is (= (str storage-url "/bucket/avatars/lifecycle") (:url req)))
+    (is (= [{"id" "expire-history"
+             "status" "Enabled"
+             "filter" {}
+             "noncurrentVersionExpiration" {"noncurrentDays" 30
+                                            "newerNoncurrentVersions" 2}}]
+           (get body "rules")))))
+
+(deftest update-bucket-lifecycle-omits-absent-fields-test
+  (let [[_ req] (run-with-capture
+                 #(storage/update-bucket-lifecycle test-client "avatars"
+                                                   {:rules [{:status "Disabled"
+                                                             :filter {}
+                                                             :noncurrent-version-expiration
+                                                             {:noncurrent-days 7}}]}))
+        body (parse-body req)
+        rule (first (get body "rules"))]
+    (is (= "Disabled" (get rule "status")))
+    (is (= {"noncurrentDays" 7} (get rule "noncurrentVersionExpiration")))
+    (is (not (contains? rule "id")))))
+
+(deftest update-bucket-lifecycle-invalid-config-test
+  (testing "at least one rule is required"
+    (is (error/anomaly? (storage/update-bucket-lifecycle test-client "avatars"
+                                                         {:rules []}))))
+  (testing "rule ids must be unique"
+    (is (error/anomaly? (storage/update-bucket-lifecycle test-client "avatars"
+                                                         {:rules [sample-rule sample-rule]}))))
+  (testing "filter must be empty"
+    (is (error/anomaly?
+         (storage/update-bucket-lifecycle test-client "avatars"
+                                          {:rules [(assoc sample-rule :filter {:prefix "tmp/"})]}))))
+  (testing "status and expiration are required per rule"
+    (is (error/anomaly?
+         (storage/update-bucket-lifecycle test-client "avatars"
+                                          {:rules [{:filter {}}]}))))
+  (testing "newer-noncurrent-versions is 1-100"
+    (is (error/anomaly?
+         (storage/update-bucket-lifecycle
+          test-client "avatars"
+          {:rules [(assoc-in sample-rule
+                             [:noncurrent-version-expiration :newer-noncurrent-versions]
+                             101)]})))))
+
+(deftest delete-bucket-lifecycle-request-test
+  (let [[_ req] (run-with-capture
+                 #(storage/delete-bucket-lifecycle test-client "avatars"))]
+    (is (= :delete (:method req)))
+    (is (= (str storage-url "/bucket/avatars/lifecycle") (:url req)))))
+
+(deftest delete-bucket-lifecycle-invalid-client-test
+  (is (error/anomaly? (storage/delete-bucket-lifecycle {} "id"))))
+
+;; ---------------------------------------------------------------------------
+;; Object versioning — file ops
+;; ---------------------------------------------------------------------------
+
+(deftest download-version-id-test
+  (let [[_ req] (run-with-capture
+                 #(storage/download (valid-storage) "a.png"
+                                    {:version-id "v1"}))]
+    (is (.contains (:url req) "versionId=v1"))))
+
+(deftest download-version-id-with-transform-test
+  (let [[_ req] (run-with-capture
+                 #(storage/download (valid-storage) "a.png"
+                                    {:transform {:width 50} :version-id "v1"}))]
+    (is (.contains (:url req) "width=50"))
+    (is (.contains (:url req) "versionId=v1"))))
+
+(deftest info-version-id-test
+  (let [[_ req] (run-with-capture
+                 #(storage/info (valid-storage) "a.png" {:version-id "v1"}))]
+    (is (= :get (:method req)))
+    (is (.contains (:url req) "/object/info/authenticated/avatars/a.png"))
+    (is (.contains (:url req) "versionId=v1"))))
+
+(deftest info-no-opts-test
+  (let [[_ req] (run-with-capture
+                 #(storage/info (valid-storage) "a.png"))]
+    (is (not (.contains (:url req) "versionId")))))
+
+(deftest info-invalid-opts-test
+  (is (error/anomaly? (storage/info (valid-storage) "a.png" {:bogus 1}))))
+
+(deftest get-public-url-version-id-test
+  (let [url (storage/get-public-url (valid-storage) "a.png" {:version-id "v1"})]
+    (is (.contains url "?versionId=v1"))))
+
+(deftest get-public-url-version-id-with-transform-test
+  (let [url (storage/get-public-url (valid-storage) "a.png"
+                                    {:transform {:width 100} :version-id "v1"})]
+    (is (.contains url "width=100"))
+    (is (.contains url "versionId=v1"))))
+
+(deftest create-signed-url-version-id-test
+  (let [resp {:status 200
+              :body {:signedURL "/object/sign/avatars/a.png?token=abc"}
+              :headers {}}
+        [_ req] (run-with-capture
+                 #(storage/create-signed-url (valid-storage) "a.png"
+                                             {:expires-in 60 :version-id "v1"})
+                 resp)
+        body (parse-body req)]
+    (is (= "v1" (get body "versionId")))))
+
+(deftest create-signed-url-no-version-id-test
+  (let [resp {:status 200
+              :body {:signedURL "/object/sign/avatars/a.png?token=abc"}
+              :headers {}}
+        [_ req] (run-with-capture
+                 #(storage/create-signed-url (valid-storage) "a.png"
+                                             {:expires-in 60})
+                 resp)
+        body (parse-body req)]
+    (is (not (contains? body "versionId")))))
+
+(deftest remove-versioned-entries-test
+  (let [[_ req] (run-with-capture
+                 #(storage/remove (valid-storage)
+                                  ["a.png" {:path "b.png" :version-id "v9"}]))
+        body (parse-body req)]
+    (is (= ["a.png" {"path" "b.png" "versionId" "v9"}] (get body "prefixes")))))
+
+(deftest remove-invalid-versioned-entry-test
+  (is (error/anomaly? (storage/remove (valid-storage) [{:path "b.png"}]))))
+
+(deftest move-source-version-id-test
+  (let [[_ req] (run-with-capture
+                 #(storage/move (valid-storage)
+                                {:from "a.png" :to "b.png" :source-version-id "v1"}))
+        body (parse-body req)]
+    (is (= "v1" (get body "sourceVersionId")))))
+
+(deftest copy-source-version-id-test
+  (let [[_ req] (run-with-capture
+                 #(storage/copy (valid-storage)
+                                {:from "a.png" :to "b.png" :source-version-id "v1"}))
+        body (parse-body req)]
+    (is (= "v1" (get body "sourceVersionId")))))
+
+(deftest list-files-version-opts-test
+  (let [[_ req] (run-with-capture
+                 #(storage/list-files (valid-storage) "folder"
+                                      {:noncurrent-versions :only
+                                       :delete-markers "include"
+                                       :exact-match true}))
+        body (parse-body req)]
+    (is (= "only" (get body "noncurrentVersions")))
+    (is (= "include" (get body "deleteMarkers")))
+    (is (= true (get body "exactMatch")))))
+
+(deftest list-files-invalid-version-opts-test
+  (is (error/anomaly? (storage/list-files (valid-storage) nil
+                                          {:noncurrent-versions :bogus}))))
+
+(deftest list-files-v2-version-opts-test
+  (let [[_ req] (run-with-capture
+                 #(storage/list-files-v2 (valid-storage) "folder"
+                                         {:noncurrent-versions :include
+                                          :delete-markers :exclude
+                                          :exact-match false}))
+        body (parse-body req)]
+    (is (= "include" (get body "noncurrentVersions")))
+    (is (= "exclude" (get body "deleteMarkers")))
+    (is (= false (get body "exactMatch")))))
+
+;; ---------------------------------------------------------------------------
 ;; Error parser
 ;; ---------------------------------------------------------------------------
 

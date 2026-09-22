@@ -382,6 +382,21 @@
     (is (not (contains? body "topK")))
     (is (not (contains? body "filter")))))
 
+(deftest query-vectors-top-k-bounds-test
+  (testing "top-k accepts 1-10000 (S3 vector buckets)"
+    (is (not (error/anomaly?
+              (first (run-with-capture
+                      #(vector/query-vectors (valid-index)
+                                             {:query-vector {:float32 [0.1]}
+                                              :top-k 10000})))))))
+  (testing "out-of-range top-k is rejected"
+    (is (error/anomaly? (vector/query-vectors (valid-index)
+                                              {:query-vector {:float32 [0.1]}
+                                               :top-k 0})))
+    (is (error/anomaly? (vector/query-vectors (valid-index)
+                                              {:query-vector {:float32 [0.1]}
+                                               :top-k 10001})))))
+
 (deftest delete-vectors-request-test
   (let [[_ req] (run-with-capture
                  #(vector/delete-vectors (valid-index) ["a" "b"]))

@@ -10,6 +10,16 @@
 (def ^:private BucketType
   (m/schema [:enum "STANDARD" "ANALYTICS" :standard :analytics]))
 
+(def ^:private VersioningStatusCreate
+  "Versioning status settable at bucket creation. `SUSPENDED` is excluded:
+  it only makes sense for a bucket that already had versioning enabled."
+  (m/schema [:enum "DISABLED" "ENABLED" :disabled :enabled]))
+
+(def ^:private VersioningStatusUpdate
+  "Versioning status settable on an existing bucket. `DISABLED` is
+  excluded: there is no transition back once versioning has been touched."
+  (m/schema [:enum "ENABLED" "SUSPENDED" :enabled :suspended]))
+
 (def BucketCreate
   "Schema for create-bucket attributes. `id` is passed positionally and is
   not part of this map."
@@ -18,7 +28,8 @@
              [:public {:optional true} [:maybe :boolean]]
              [:file-size-limit {:optional true} [:maybe :int]]
              [:allowed-mime-types {:optional true} [:maybe [:vector :string]]]
-             [:type {:optional true} [:maybe #'BucketType]]]))
+             [:type {:optional true} [:maybe #'BucketType]]
+             [:versioning-status {:optional true} [:maybe #'VersioningStatusCreate]]]))
 
 (def BucketUpdate
   "Schema for update-bucket attributes."
@@ -27,7 +38,8 @@
              [:public {:optional true} [:maybe :boolean]]
              [:file-size-limit {:optional true} [:maybe :int]]
              [:allowed-mime-types {:optional true} [:maybe [:vector :string]]]
-             [:type {:optional true} [:maybe #'BucketType]]]))
+             [:type {:optional true} [:maybe #'BucketType]]
+             [:versioning-status {:optional true} [:maybe #'VersioningStatusUpdate]]]))
 
 (def ^:private BucketSortColumn
   (m/schema [:enum "id" "name" "created_at" "updated_at"
@@ -58,6 +70,47 @@
              {:closed true}
              [:transformations {:optional true} [:= true]]]))
 
+;; ---------------------------------------------------------------------------
+;; Bucket lifecycle
+;; ---------------------------------------------------------------------------
+
+(def ^:private LifecycleRuleStatus
+  (m/schema [:enum "Enabled" "Disabled" :enabled :disabled]))
+
+(def ^:private NoncurrentVersionExpiration
+  "When to expire noncurrent (previous) object versions. `noncurrent-days`
+  is how old a version must be before it can expire;
+  `newer-noncurrent-versions` keeps that many of the newest noncurrent
+  versions regardless of age (1-100)."
+  (m/schema [:map
+             {:closed true}
+             [:noncurrent-days [:int {:min 1}]]
+             [:newer-noncurrent-versions {:optional true} [:int {:min 1 :max 100}]]]))
+
+(def ^:private LifecycleRule
+  "One lifecycle rule. Today the only action is
+  `:noncurrent-version-expiration`. `:filter` is required and must be `{}`:
+  prefix, tag and size filters are rejected by the server. `:id` is
+  optional; the server generates one when omitted."
+  (m/schema [:map
+             {:closed true}
+             [:id {:optional true} :string]
+             [:status #'LifecycleRuleStatus]
+             [:filter [:map {:closed true}]]
+             [:noncurrent-version-expiration #'NoncurrentVersionExpiration]]))
+
+(def LifecycleConfiguration
+  "Schema for a bucket lifecycle configuration: 1-1000 rules, rule ids
+  unique when set."
+  (m/schema [:and
+             [:map
+              {:closed true}
+              [:rules [:vector {:min 1 :max 1000} #'LifecycleRule]]]
+             [:fn {:error/message "lifecycle rule ids must be unique"}
+              (fn [{:keys [rules]}]
+                (let [ids (keep :id rules)]
+                  (or (empty? ids) (apply distinct? ids))))]]))
+
 (def Storage
   "Schema for a storage instance map produced by `from`."
   (m/schema [:map
@@ -71,14 +124,26 @@
              [:column {:optional true} :string]
              [:order {:optional true} [:enum "asc" "desc"]]]))
 
+(def ^:private VersionListing
+  "How versioned listings treat noncurrent versions and delete markers."
+  (m/schema [:enum "exclude" "include" "only" :exclude :include :only]))
+
 (def SearchOptions
-  "Schema for list-files search options. All fields optional."
+  "Schema for list-files search options. All fields optional.
+
+  * `:noncurrent-versions` — `:exclude` (default), `:include` or `:only`;
+    controls whether noncurrent object versions appear
+  * `:delete-markers` — `:exclude` (default), `:include` or `:only`
+  * `:exact-match` — only objects whose key exactly matches the prefix"
   (m/schema [:map
              {:closed true}
              [:limit {:optional true} :int]
              [:offset {:optional true} :int]
              [:sort-by {:optional true} #'SortBy]
-             [:search {:optional true} :string]]))
+             [:search {:optional true} :string]
+             [:noncurrent-versions {:optional true} #'VersionListing]
+             [:delete-markers {:optional true} #'VersionListing]
+             [:exact-match {:optional true} :boolean]]))
 
 (def FileOptions
   "Schema for upload/update options."
@@ -111,12 +176,18 @@
 
   * `:limit` — page size (default server-side 100)
   * `:cursor` — pagination cursor from a previous response
-  * `:with-delimiter` — group by folder hierarchy when true"
+  * `:with-delimiter` — group by folder hierarchy when true
+  * `:noncurrent-versions` — `:exclude` (default), `:include` or `:only`
+  * `:delete-markers` — `:exclude` (default), `:include` or `:only`
+  * `:exact-match` — only objects whose key exactly matches the prefix"
   (m/schema [:map
              {:closed true}
              [:limit {:optional true} :int]
              [:cursor {:optional true} :string]
-             [:with-delimiter {:optional true} :boolean]]))
+             [:with-delimiter {:optional true} :boolean]
+             [:noncurrent-versions {:optional true} #'VersionListing]
+             [:delete-markers {:optional true} #'VersionListing]
+             [:exact-match {:optional true} :boolean]]))
 
 (def SignedUploadOpts
   "Schema for create-signed-upload-url options."
@@ -131,6 +202,8 @@
   * `:range` — `[start end]` byte range (inclusive) for partial downloads
   * `:transform` — image transformation options (renders via render/image)
   * `:cache-nonce` — value for the `cacheNonce` query param (cache busting)
+  * `:version-id` — download a specific object version instead of the
+    current one (requires bucket versioning)
   * `:headers` — extra request headers"
   (m/schema [:map
              {:closed true}
@@ -138,23 +211,45 @@
              [:range {:optional true} [:tuple :int :int]]
              [:transform {:optional true} #'TransformOptions]
              [:cache-nonce {:optional true} :string]
+             [:version-id {:optional true} :string]
              [:headers {:optional true} [:map-of :string :string]]]))
 
+(def InfoOpts
+  "Schema for info options. `:version-id` retrieves metadata for a specific
+  object version instead of the current one."
+  (m/schema [:map
+             {:closed true}
+             [:version-id {:optional true} :string]]))
+
+(def RemovePaths
+  "Schema for remove paths: a vector of plain paths (deletes the version
+  currently at each path) or `{:path :version-id}` maps (deletes an exact
+  version, current or archived)."
+  (m/schema [:vector {:min 1}
+             [:or :string
+              [:map {:closed true}
+               [:path :string]
+               [:version-id :string]]]]))
+
 (def MoveCopyOpts
-  "Schema for move/copy options."
+  "Schema for move/copy options. `:source-version-id` moves/copies a
+  specific version of the source object instead of the current one."
   (m/schema [:map
              {:closed true}
              [:from :string]
              [:to :string]
-             [:destination-bucket {:optional true} [:maybe :string]]]))
+             [:destination-bucket {:optional true} [:maybe :string]]
+             [:source-version-id {:optional true} [:maybe :string]]]))
 
 (def SignedUrlOpts
-  "Schema for create-signed-url options. `expires-in` is required (seconds)."
+  "Schema for create-signed-url options. `expires-in` is required (seconds).
+  `:version-id` signs a specific object version instead of the current one."
   (m/schema [:map
              {:closed true}
              [:expires-in :int]
              [:download {:optional true} [:or :boolean :string]]
-             [:transform {:optional true} #'TransformOptions]]))
+             [:transform {:optional true} #'TransformOptions]
+             [:version-id {:optional true} :string]]))
 
 (def SignedUrlsOpts
   "Schema for create-signed-urls options."
@@ -164,11 +259,13 @@
              [:download {:optional true} [:or :boolean :string]]]))
 
 (def PublicUrlOpts
-  "Schema for get-public-url options."
+  "Schema for get-public-url options. `:version-id` returns the URL for a
+  specific object version instead of the current one."
   (m/schema [:map
              {:closed true}
              [:download {:optional true} [:or :boolean :string]]
-             [:transform {:optional true} #'TransformOptions]]))
+             [:transform {:optional true} #'TransformOptions]
+             [:version-id {:optional true} :string]]))
 
 (def UploadBody
   "Schema for upload body — bytes, InputStream, File, or string."
@@ -303,11 +400,12 @@
                     (< segment-index segment-count)))]]))
 
 (def QueryVectorsQuery
-  "Schema for query-vectors input. `:query-vector` is required."
+  "Schema for query-vectors input. `:query-vector` is required. `:top-k`
+  accepts 1-10000 (S3 vector buckets; other backends may cap lower)."
   (m/schema [:map
              {:closed true}
              [:query-vector #'VectorData]
-             [:top-k {:optional true} :int]
+             [:top-k {:optional true} [:int {:min 1 :max 10000}]]
              [:filter {:optional true} :map]
              [:return-distance {:optional true} :boolean]
              [:return-metadata {:optional true} :boolean]]))
