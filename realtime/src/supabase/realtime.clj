@@ -169,9 +169,9 @@
         (let [filter' (if (= :postgres-changes binding-type)
                         (normalize-postgres-filter filter)
                         filter)
-            binding {:type binding-type
-                     :filter filter'
-                     :callback callback}
+              binding {:type binding-type
+                       :filter filter'
+                       :callback callback}
               c (:conn ch)
               topic (:topic ch)]
           (if (and (= :postgres-changes binding-type)
@@ -201,17 +201,45 @@
 
 (defn subscribe
   "Sends `phx_join` for `ch` and transitions to `:joining`. The channel
-  receives `:joined` asynchronously when the server replies. Returns `ch`."
-  [ch]
-  (let [c (channel-conn ch)
-        topic (:topic ch)
-        cs (conn/channel-state c topic)
-        ref (new-ref ch)
-        token (conn/resolve-token c)
-        frame (proto/join-frame ref topic (:config cs) (:bindings cs) token)]
-    (conn/update-channel! c topic assoc :state :joining :join-ref ref)
-    (conn/enqueue! c frame)
-    ch))
+  receives `:joined` asynchronously when the server replies. Returns `ch`,
+  or an anomaly when `opts` is invalid.
+
+  ## Options
+
+    * `:postgres-changes-options`: `{:wait bool :timeout ms}`.
+
+  By default the server acks the join as soon as the channel is up, which
+  can precede the postgres_changes subscription actually streaming. With
+  `{:wait true}` the server holds its reply until the subscription is
+  confirmed active, and rejects the join when it cannot be established
+  (surfaced via the connection's `:on-error`, with the channel left in
+  `:errored`). `:timeout` (ms) bounds the server-side wait; it defaults to
+  15000 server-side and is clamped to the server's configured maximum, so
+  asking for more waits less. No effect on a channel without
+  postgres_changes bindings.
+
+  The options are stored on the channel and reused on reconnect rejoins.
+
+  Note: joins in this client are fire-and-forget with the reply awaited
+  asynchronously, so there is no client-side join timeout to extend (in
+  realtime-js `wait` also extends the join timeout past the server's held
+  reply)."
+  ([ch] (subscribe ch {}))
+  ([ch opts]
+   (or (specs/ensure-valid specs/SubscribeOpts opts)
+       (let [c (channel-conn ch)
+             topic (:topic ch)
+             cs (if-let [pg-opts (:postgres-changes-options opts)]
+                  (conn/update-channel! c topic assoc
+                                        :postgres-changes-options pg-opts)
+                  (conn/channel-state c topic))
+             ref (new-ref ch)
+             token (conn/resolve-token c)
+             frame (proto/join-frame ref topic (:config cs) (:bindings cs)
+                                     token (:postgres-changes-options cs))]
+         (conn/update-channel! c topic assoc :state :joining :join-ref ref)
+         (conn/enqueue! c frame)
+         ch))))
 
 (defn unsubscribe
   "Sends `phx_leave` and transitions to `:leaving`. Channel state is removed

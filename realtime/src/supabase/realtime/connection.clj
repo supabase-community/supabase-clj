@@ -509,7 +509,8 @@
       (let [token (resolve-token conn)]
         (doseq [[topic cs] to-rejoin]
           (let [ref (new-ref (:state conn))
-                frame (proto/join-frame ref topic (:config cs) (:bindings cs) token)]
+                frame (proto/join-frame ref topic (:config cs) (:bindings cs)
+                                        token (:postgres-changes-options cs))]
             (update-channel! conn topic assoc :state :joining :join-ref ref)
             (enqueue! conn frame)))))))
 

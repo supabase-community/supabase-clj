@@ -30,6 +30,19 @@
              {:closed true}
              [:config {:optional true} #'ChannelConfig]]))
 
+(def PostgresChangesOptions
+  "Schema for the `:postgres-changes-options` passed to `subscribe`."
+  (m/schema [:map
+             {:closed true}
+             [:wait {:optional true} :boolean]
+             [:timeout {:optional true} :int]]))
+
+(def SubscribeOpts
+  "Schema for the options map passed to `subscribe`."
+  (m/schema [:map
+             {:closed true}
+             [:postgres-changes-options {:optional true} #'PostgresChangesOptions]]))
+
 (def ConnectOpts
   "Schema for the options map passed to `connect`."
   (m/schema [:map

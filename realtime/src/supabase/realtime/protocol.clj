@@ -67,18 +67,34 @@
       filter (assoc :filter filter)
       select (assoc :select select))))
 
+(defn- postgres-changes-options-payload
+  "Wire form of the `:postgres-changes-options` subscribe option. Only
+  keys the caller set are included, so the server-side defaults apply to
+  the rest."
+  [opts]
+  (cond-> {}
+    (contains? opts :wait) (assoc :wait (:wait opts))
+    (:timeout opts)        (assoc :timeout (:timeout opts))))
+
 (defn join-frame
   "Builds a `phx_join` frame for `topic` with the given channel `config`
   and `bindings` vector. `access-token` is optional and added to the
-  payload when present."
-  [ref topic config bindings access-token]
-  (let [pg-bindings (->> bindings
-                         (filter #(= :postgres-changes (:type %)))
-                         (mapv postgres-binding-payload))
-        config' (assoc config :postgres_changes pg-bindings)
-        payload (cond-> {:config config'}
-                  access-token (assoc :access_token access-token))]
-    {:topic topic :event "phx_join" :payload payload :ref ref :join_ref ref}))
+  payload when present. `postgres-changes-opts` (`{:wait bool
+  :timeout ms}`, optional) is added to the config as
+  `postgres_changes_options`."
+  ([ref topic config bindings access-token]
+   (join-frame ref topic config bindings access-token nil))
+  ([ref topic config bindings access-token postgres-changes-opts]
+   (let [pg-bindings (->> bindings
+                          (filter #(= :postgres-changes (:type %)))
+                          (mapv postgres-binding-payload))
+         config' (cond-> (assoc config :postgres_changes pg-bindings)
+                   postgres-changes-opts
+                   (assoc :postgres_changes_options
+                          (postgres-changes-options-payload postgres-changes-opts)))
+         payload (cond-> {:config config'}
+                   access-token (assoc :access_token access-token))]
+     {:topic topic :event "phx_join" :payload payload :ref ref :join_ref ref})))
 
 (defn leave-frame
   "Builds a `phx_leave` frame."

@@ -71,6 +71,27 @@ All functions either return the input value (channel or connection) or a
 cognitect-anomaly map. Async transport / server errors are delivered to
 the `:on-error` callback passed to `connect`.
 
+## Waiting for postgres_changes confirmation
+
+By default the server acks `subscribe` as soon as the channel joins, which
+can precede the postgres_changes subscription actually streaming. Pass
+`:postgres-changes-options {:wait true}` to hold the join reply until the
+subscription is confirmed:
+
+```clojure
+(rt/on ch :postgres-changes {:event :insert :schema "public" :table "messages"}
+       (fn [payload] (println "row" payload)))
+
+(rt/subscribe ch {:postgres-changes-options {:wait true
+                                             :timeout 15000}})
+```
+
+If the subscription cannot be established, the server rejects the join and
+the channel lands in `:errored` with the reason delivered to `:on-error`.
+`:timeout` (ms) bounds the server-side wait and defaults to 15000
+server-side. The options are stored on the channel and reused on reconnect
+rejoins. No effect on channels without postgres_changes bindings.
+
 ## v0.1.0 scope
 
 **In:** postgres_changes, broadcast send/receive, basic presence, manual

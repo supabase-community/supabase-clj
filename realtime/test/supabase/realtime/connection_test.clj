@@ -373,6 +373,38 @@
           (is (= "realtime:r" (:topic rejoin)))))
       (finally (conn/disconnect conn)))))
 
+(deftest rejoin-carries-postgres-changes-options
+  (let [rt (counting-transports)
+        conn (conn/connect test-client
+                           {:transport-factory (:factory rt)
+                            :heartbeat-ms 60000
+                            :reconnect-after-ms (constantly 5)
+                            :on-error (fn [_] nil)})]
+    (try
+      ((:open rt))
+      (conn/upsert-channel! conn "realtime:r" {:private false})
+      (conn/add-binding! conn "realtime:r"
+                         {:type :postgres-changes
+                          :filter {:event :insert :schema "public" :table "u"}
+                          :callback identity})
+      (conn/update-channel! conn "realtime:r" assoc
+                            :state :joining :join-ref "1"
+                            :postgres-changes-options {:wait true})
+      (conn/dispatch-frame conn {:topic "realtime:r"
+                                 :event "phx_reply"
+                                 :ref "1"
+                                 :payload {:status "ok"
+                                           :response {:postgres_changes [{:id 1}]}}})
+      (is (= :joined (:state (conn/channel-state conn "realtime:r"))))
+      ((:close rt) 1006 "abnormal")
+      (is (wait-for #(= 2 @(:calls rt)) 2000))
+      ((:open rt))
+      (let [rejoin (proto/parse-frame (last @(:sent rt)))]
+        (is (= "phx_join" (:event rejoin)))
+        (is (= {:wait true}
+               (get-in rejoin [:payload :config :postgres_changes_options]))))
+      (finally (conn/disconnect conn)))))
+
 (deftest reconnect-gives-up-after-max-attempts
   (let [rt (counting-transports {:fail-after 1})
         errs (atom [])

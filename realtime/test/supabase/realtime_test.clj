@@ -226,6 +226,69 @@
       (finally (rt/disconnect conn)))))
 
 ;; ---------------------------------------------------------------------------
+;; subscribe :postgres-changes-options
+;; ---------------------------------------------------------------------------
+
+(deftest subscribe-sends-postgres-changes-options
+  (with-conn
+    (fn [conn rt]
+      ((:open rt))
+      (let [ch (rt/channel conn "r")]
+        (rt/on ch :postgres-changes
+               {:event :insert :schema "public" :table "u"} identity)
+        (rt/subscribe ch {:postgres-changes-options {:wait true :timeout 20000}}))
+      (let [f (last-sent-frame rt)]
+        (is (= "phx_join" (:event f)))
+        (is (= {:wait true :timeout 20000}
+               (get-in f [:payload :config :postgres_changes_options])))))))
+
+(deftest subscribe-postgres-changes-options-omit-unset-keys
+  (with-conn
+    (fn [conn rt]
+      ((:open rt))
+      (let [ch (rt/channel conn "r")]
+        (rt/on ch :postgres-changes
+               {:event :insert :schema "public" :table "u"} identity)
+        (rt/subscribe ch {:postgres-changes-options {:wait true}}))
+      (is (= {:wait true}
+             (get-in (last-sent-frame rt) [:payload :config :postgres_changes_options]))
+          "timeout falls back to the server-side default when unset"))))
+
+(deftest subscribe-without-postgres-changes-options-sends-none
+  (with-conn
+    (fn [conn rt]
+      ((:open rt))
+      (let [ch (rt/channel conn "r")]
+        (rt/on ch :postgres-changes
+               {:event :insert :schema "public" :table "u"} identity)
+        (rt/subscribe ch))
+      (is (nil? (get-in (last-sent-frame rt)
+                        [:payload :config :postgres_changes_options]))))))
+
+(deftest subscribe-postgres-changes-options-noop-without-bindings
+  (testing "wait has no effect without postgres_changes bindings: the join
+  goes out unchanged and the server ignores the options"
+    (with-conn
+      (fn [conn rt]
+        ((:open rt))
+        (let [ch (rt/channel conn "r")]
+          (rt/subscribe ch {:postgres-changes-options {:wait true}})
+          (is (= {:wait true}
+                 (get-in (last-sent-frame rt)
+                         [:payload :config :postgres_changes_options])))
+          (is (empty? (get-in (last-sent-frame rt)
+                              [:payload :config :postgres_changes]))))))))
+
+(deftest subscribe-rejects-invalid-opts
+  (with-conn
+    (fn [conn _]
+      (let [ch (rt/channel conn "r")]
+        (is (error/anomaly? (rt/subscribe ch {:bogus 1})))
+        (is (error/anomaly? (rt/subscribe ch {:postgres-changes-options {:wait "yes"}})))
+        (is (error/anomaly? (rt/subscribe ch {:postgres-changes-options {:timeout "10s"}})))
+        (is (error/anomaly? (rt/subscribe ch {:postgres-changes-options {:bogus 1}})))))))
+
+;; ---------------------------------------------------------------------------
 ;; broadcast send + buffering
 ;; ---------------------------------------------------------------------------
 
