@@ -157,6 +157,17 @@ timestamps, and booleans so you can pass them as filter values:
     (pg/execute))
 ```
 
+## OpenAPI spec
+
+`get-openapi-spec` fetches the OpenAPI description PostgREST serves at the
+REST root, listing the tables, views and functions the caller's role can
+access:
+
+```clojure
+(pg/get-openapi-spec c)
+(pg/get-openapi-spec c {:schema "billing"})  ;; via Accept-Profile
+```
+
 ## Async & cancellation
 
 `execute-async` returns a cancellable `CompletableFuture`:

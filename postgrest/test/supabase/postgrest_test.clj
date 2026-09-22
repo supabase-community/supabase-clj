@@ -574,3 +574,45 @@
     (is (= "3" (get-in req [:headers "x-jwt-level"])))
     (is (= "count=exact" (get-in req [:headers "prefer"]))
         "unrelated headers already on the request are preserved")))
+
+;; ---------------------------------------------------------------------------
+;; get-openapi-spec
+;; ---------------------------------------------------------------------------
+
+(deftest get-openapi-spec-requests-rest-root
+  (let [[resp req] (run-with-capture
+                    #(pg/get-openapi-spec test-client)
+                    {:status 200 :headers {}
+                     :body {:swagger "2.0" :info {:title "PostgREST API"}
+                            :paths {"/users" {}}}})]
+    (is (= :get (:method req)))
+    (is (= (str db-url "/") (:url req)))
+    (is (= :postgrest (:service req)))
+    (is (= "application/openapi+json" (get-in req [:headers "accept"])))
+    (is (= "public" (get-in req [:headers "accept-profile"])))
+    (is (= true (:retries req)) "idempotent GET picks up the default retry policy")
+    (is (= "2.0" (get-in resp [:body :swagger])))))
+
+(deftest get-openapi-spec-schema-variant
+  (let [[_ req] (run-with-capture
+                 #(pg/get-openapi-spec test-client {:schema "billing"}))]
+    (is (= "billing" (get-in req [:headers "accept-profile"])))))
+
+(deftest get-openapi-spec-uses-client-schema
+  (let [c (client/make-client base-url "anon-key" :db {:schema "private"})
+        [_ req] (run-with-capture #(pg/get-openapi-spec c))]
+    (is (= "private" (get-in req [:headers "accept-profile"])))))
+
+(deftest get-openapi-spec-invalid-client
+  (is (error/anomaly? (pg/get-openapi-spec {}))))
+
+(deftest get-openapi-spec-enriches-anomaly
+  (with-redefs [http/execute
+                (fn [_]
+                  (error/from-http-response 400 {:message "schema not exposed"
+                                                 :code "PGRST106"}
+                                            :postgrest))]
+    (let [res (pg/get-openapi-spec test-client)]
+      (is (error/anomaly? res))
+      (is (= "schema not exposed" (:cognitect.anomalies/message res)))
+      (is (= "PGRST106" (:postgrest/code res))))))

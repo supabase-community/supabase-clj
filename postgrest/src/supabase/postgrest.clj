@@ -139,6 +139,41 @@
       out)))
 
 ;; ---------------------------------------------------------------------------
+;; OpenAPI
+;; ---------------------------------------------------------------------------
+
+(defn get-openapi-spec
+  "Fetches the OpenAPI description PostgREST publishes for a schema: a GET
+  on the REST root with `Accept: application/openapi+json`. The document
+  lists only the tables, views and functions the caller's role holds
+  privileges on; PostgREST applies that filtering server-side.
+
+  `opts`:
+
+    * `:schema`: describe a schema other than the client's configured one.
+      Sent as the `Accept-Profile` header; defaults to the client's
+      `:db :schema`.
+
+  Returns `{:status :body :headers}` with the parsed spec under `:body`, or
+  an anomaly enriched with PostgREST error metadata. Being idempotent, the
+  request follows the same default retry policy as [[execute]].
+
+      (pg/get-openapi-spec client)
+      (pg/get-openapi-spec client {:schema \"billing\"})"
+  ([c] (get-openapi-spec c {}))
+  ([c {:keys [schema]}]
+   (or (client/ensure-client c)
+       (-> (http/request c)
+           (http/with-service-url :database-url "/")
+           (assoc :service :postgrest)
+           (http/with-headers {"accept" "application/openapi+json"
+                               "accept-profile" (or schema
+                                                    (get-in c [:db :schema] "public"))})
+           with-default-retries
+           http/execute
+           pg-error/enrich))))
+
+;; ---------------------------------------------------------------------------
 ;; Re-exports — flat surface so callers `(pg/eq req col val)` etc.
 ;; ---------------------------------------------------------------------------
 
