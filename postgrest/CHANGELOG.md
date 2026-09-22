@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.3.0...postgrest-v1.4.0) (2026-09-22)
+
+
+### Features
+
+* **postgrest:** get-openapi-spec on the REST root ([07b47ad](https://github.com/supabase-community/supabase-clj/commit/07b47ad90546eb2f3e30023fa1ff026e20d498fa))
+
 ## [1.3.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.2.0...postgrest-v1.3.0) (2026-08-31)
 
 
