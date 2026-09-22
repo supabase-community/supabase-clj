@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/supabase-community/supabase-clj/compare/realtime-v1.3.0...realtime-v1.4.0) (2026-09-22)
+
+
+### Features
+
+* **realtime:** postgres-changes-options wait on subscribe ([043d770](https://github.com/supabase-community/supabase-clj/commit/043d770c8f3a305456cad8184562ece77c5bed54))
+
 ## [1.3.0](https://github.com/supabase-community/supabase-clj/compare/realtime-v1.2.0...realtime-v1.3.0) (2026-08-31)
 
 

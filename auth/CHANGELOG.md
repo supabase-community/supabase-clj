@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/supabase-community/supabase-clj/compare/auth-v0.5.0...auth-v0.6.0) (2026-09-22)
+
+
+### Features
+
+* **auth:** MFA recovery codes, enroll rollback for failed webauthn registration ([2ef43d1](https://github.com/supabase-community/supabase-clj/commit/2ef43d13a5611707c1805c1e4def865c5703dca6))
+
 ## [0.5.0](https://github.com/supabase-community/supabase-clj/compare/auth-v0.4.0...auth-v0.5.0) (2026-08-27)
 
 
