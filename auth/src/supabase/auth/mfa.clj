@@ -18,6 +18,13 @@
   Phone and WebAuthn factors need the explicit `challenge` + `verify`
   round-trip since the response arrives out of band.
 
+  Recovery codes (experimental server-side) give users a fallback when
+  their usual factor is unavailable:
+
+      (mfa/generate-recovery-codes client token)       ;; show codes once
+      (mfa/get-recovery-codes-status client token)     ;; remaining count
+      (mfa/verify-recovery-code client token {:code \"K4M9-X7QP-2AB8-HT3Z\"})
+
   Each function returns `{:status :body :headers}` on success or an anomaly
   map on failure. See https://supabase.com/docs/guides/auth/auth-mfa"
   (:require [clojure.string :as str]
@@ -41,6 +48,8 @@
 (defn- with-auth [req access-token]
   (http/with-headers req {"authorization" (str "Bearer " access-token)}))
 
+(declare unenroll-stale-unverified-factor)
+
 (defn enroll
   "Enrolls a new MFA factor for the user. The factor starts `unverified`;
   complete a `challenge` + `verify` round-trip to activate it.
@@ -58,19 +67,31 @@
   For TOTP the response body carries `:totp` with the QR code SVG, secret
   and provisioning URI to present to the user.
 
+  When a `\"webauthn\"` enrollment with a `:friendly-name` fails, the stale
+  unverified factor a previous failed registration left under that name is
+  unenrolled first, so a retry with the same name can succeed. Verified
+  factors are never touched. Mirrors auth-js #2641.
+
   ## Example
 
       (enroll client \"<access-token>\" {:factor-type \"totp\"})"
   [client access-token params]
   (or (client/ensure-client client)
       (specs/ensure-valid specs/MFAEnroll params)
-      (-> (http/request client)
-          (http/with-method :post)
-          (http/with-service-url :auth-url factors-uri)
-          (with-auth access-token)
-          (http/with-body (snake-keys params))
-          (errors/with-auth-errors)
-          (http/execute))))
+      (let [resp (-> (http/request client)
+                     (http/with-method :post)
+                     (http/with-service-url :auth-url factors-uri)
+                     (with-auth access-token)
+                     (http/with-body (snake-keys params))
+                     (errors/with-auth-errors)
+                     (http/execute))]
+        (if (and (error/anomaly? resp)
+                 (= "webauthn" (:factor-type params))
+                 (:friendly-name params))
+          (do (unenroll-stale-unverified-factor client access-token
+                                                (:friendly-name params))
+              resp)
+          resp))))
 
 (defn challenge
   "Creates a challenge for the factor `factor-id`. The returned body carries
@@ -207,3 +228,104 @@
                 {:current-level aal
                  :next-level (if verified? "aal2" aal)
                  :current-authentication-methods (vec (or amr []))})))))))
+
+(defn- unenroll-stale-unverified-factor
+  "Best-effort cleanup after a failed WebAuthn registration: unenrolls the
+  unverified `webauthn` factor carrying `friendly-name`, when one exists.
+  Only unverified factors match; a verified factor under that name is a
+  credential in active use and is never removed. Cleanup failures are
+  swallowed so the caller still sees the original enroll anomaly."
+  [client access-token friendly-name]
+  (let [resp (list-factors client access-token)]
+    (when-not (error/anomaly? resp)
+      (when-let [factor (some #(when (and (= "webauthn" (:factor_type %))
+                                          (= friendly-name (:friendly_name %))
+                                          (= "unverified" (:status %)))
+                                 %)
+                              (get-in resp [:body :all]))]
+        (unenroll client access-token (:id factor)))))
+  nil)
+
+;; ---------------------------------------------------------------------------
+;; Recovery codes (experimental)
+;; ---------------------------------------------------------------------------
+
+(def ^:private recovery-codes-uri "/factors/recovery-codes")
+
+(defn get-recovery-codes-status
+  "Returns the enrollment status of the user's recovery codes.
+
+  On success the body is a map with `:id` (the recovery codes factor id),
+  `:type` (always `\"recovery_code\"`), `:total` (codes in the current set)
+  and `:remaining` (codes not yet consumed). It never contains code values.
+
+  Experimental: requires recovery codes to be enabled on the server.
+
+  ## Example
+
+      (get-recovery-codes-status client \"<access-token>\")"
+  [client access-token]
+  (or (client/ensure-client client)
+      (-> (http/request client)
+          (http/with-service-url :auth-url recovery-codes-uri)
+          (with-auth access-token)
+          (errors/with-auth-errors)
+          (http/execute))))
+
+(defn generate-recovery-codes
+  "Generates the user's set of recovery codes. The plaintext `:codes` in the
+  response body are returned exactly once and cannot be retrieved again;
+  present them to the user for safe-keeping.
+
+  `params`:
+
+    * `:friendly-name` — label for the recovery codes factor, as shown in
+      factor lists. Must be unique among the user's factors; the server
+      defaults it to `\"Recovery codes\"` when omitted. No request body is
+      sent unless a name is given.
+
+  Experimental: requires recovery codes to be enabled on the server.
+
+  ## Example
+
+      (generate-recovery-codes client \"<access-token>\")
+      (generate-recovery-codes client \"<access-token>\" {:friendly-name \"backup\"})"
+  ([client access-token] (generate-recovery-codes client access-token {}))
+  ([client access-token params]
+   (or (client/ensure-client client)
+       (specs/ensure-valid specs/MFARecoveryCodesGenerate params)
+       (-> (http/request client)
+           (http/with-method :post)
+           (http/with-service-url :auth-url recovery-codes-uri)
+           (with-auth access-token)
+           (http/with-body (when (:friendly-name params) (snake-keys params)))
+           (errors/with-auth-errors)
+           (http/execute)))))
+
+(defn verify-recovery-code
+  "Verifies one of the user's recovery codes and upgrades the session to
+  AAL2. Each code can be used only once.
+
+  `params`: `{:code \"K4M9-X7QP-2AB8-HT3Z\"}`. Letter case, whitespace and
+  `-` separators are ignored by the server, so the code can be passed
+  exactly as the user typed it.
+
+  On success the body carries a fresh session (new access/refresh tokens)
+  that replaces the current one: adopt it as the active session, as the
+  user's other AAL1 sessions are signed out server-side.
+
+  Experimental: requires recovery codes to be enabled on the server.
+
+  ## Example
+
+      (verify-recovery-code client \"<access-token>\" {:code \"K4M9-X7QP-2AB8-HT3Z\"})"
+  [client access-token params]
+  (or (client/ensure-client client)
+      (specs/ensure-valid specs/MFARecoveryCodeVerify params)
+      (-> (http/request client)
+          (http/with-method :post)
+          (http/with-service-url :auth-url (str recovery-codes-uri "/verify"))
+          (with-auth access-token)
+          (http/with-body (snake-keys params))
+          (errors/with-auth-errors)
+          (http/execute))))

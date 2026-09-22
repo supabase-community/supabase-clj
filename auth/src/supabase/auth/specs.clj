@@ -431,6 +431,18 @@
               (fn [{:keys [code webauthn]}]
                 (or (some? code) (some? webauthn)))]]))
 
+(def MFARecoveryCodesGenerate
+  "Schema for `mfa/generate-recovery-codes`."
+  (m/schema [:map
+             {:closed true}
+             [:friendly-name {:optional true} [:maybe :string]]]))
+
+(def MFARecoveryCodeVerify
+  "Schema for `mfa/verify-recovery-code`."
+  (m/schema [:map
+             {:closed true}
+             [:code :string]]))
+
 ;; ---------------------------------------------------------------------------
 ;; Admin OAuth client schemas
 ;; ---------------------------------------------------------------------------
