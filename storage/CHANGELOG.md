@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.5.0...storage-v0.6.0) (2026-09-22)
+
+
+### Features
+
+* **storage:** bucket lifecycle rules, object versioning, topK 10k ([7c17740](https://github.com/supabase-community/supabase-clj/commit/7c17740ecc7ae4bce0147531e350a5e45584f90d))
+
 ## [0.5.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.4.0...storage-v0.5.0) (2026-08-31)
 
 
