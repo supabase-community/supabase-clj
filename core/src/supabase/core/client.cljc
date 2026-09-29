@@ -46,7 +46,7 @@
             [malli.core :as m]
             [malli.transform :as mt]
             [supabase.core.error :as error]
-            [supabase.core.transport :as transport]))
+            #?@(:clj [[supabase.core.transport :as transport]])))
 
 ;; x-release-please-start-version
 (def ^:private version "0.7.0")
@@ -84,7 +84,7 @@
   (m/schema [:map [:use-new-hostname {:default false} :boolean]]))
 
 (def Pool
-  "Schema for HTTP transport pool options. See
+  "Schema for HTTP transport pool options (JVM only). See
   `supabase.core.transport/build-http-client` for the full key set."
   (m/schema [:map
              [:connect-timeout {:optional true} :int]
@@ -132,6 +132,23 @@
              [:log? {:optional true} :boolean]]))
 
 ;; ---------------------------------------------------------------------------
+;; URL parsing (portable)
+;; ---------------------------------------------------------------------------
+
+(def ^:private url-re
+  "Decomposes an absolute URL: scheme, host, port, path, query, fragment."
+  #"^([a-zA-Z][a-zA-Z0-9+.-]*)://([^/:?#]+)(?::(\d+))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$")
+
+(defn- parse-url
+  "Parses an absolute URL string into `{:scheme :host :port :path :query
+  :fragment}`, or nil when the shape does not match. Portable across JVM
+  and ClojureScript."
+  [url]
+  (when (string? url)
+    (when-let [[_ scheme host port path query fragment] (re-matches url-re url)]
+      {:scheme scheme :host host :port port :path path :query query :fragment fragment})))
+
+;; ---------------------------------------------------------------------------
 ;; Storage hostname transformation
 ;; ---------------------------------------------------------------------------
 
@@ -161,15 +178,15 @@
       ;; => \"https://custom.example.com/storage/v1\""
   [storage-url]
   (when (and (string? storage-url) (seq storage-url))
-    (let [uri (java.net.URI. storage-url)
-          host (.getHost uri)]
-      (if (and host (supabase-domain? host) (not (has-storage-subdomain? host)))
-        (str (.getScheme uri) "://" (transform-hostname host)
-             (when-let [port (.getPort uri)] (when (pos? port) (str ":" port)))
-             (.getRawPath uri)
-             (when-let [q (.getRawQuery uri)] (str "?" q))
-             (when-let [f (.getRawFragment uri)] (str "#" f)))
-        storage-url))))
+    (if-let [{:keys [scheme host port path query fragment]} (parse-url storage-url)]
+      (if (and (supabase-domain? host) (not (has-storage-subdomain? host)))
+        (str scheme "://" (transform-hostname host)
+             (when port (str ":" port))
+             path
+             (when query (str "?" query))
+             (when fragment (str "#" fragment)))
+        storage-url)
+      storage-url)))
 
 (defn- maybe-transform-storage-url [storage-url opts]
   (if (get-in opts [:storage :use-new-hostname])
@@ -184,8 +201,8 @@
   "Derives the default auth storage key from the base URL.
   e.g. \"https://abc123.supabase.co\" => \"sb-abc123-auth-token\""
   [base-url]
-  (let [host (.getHost (java.net.URI. base-url))
-        prefix (first (str/split host #"\." 2))]
+  (let [host (:host (parse-url base-url))
+        prefix (first (str/split (or host "") #"\." 2))]
     (str "sb-" prefix "-auth-token")))
 
 ;; ---------------------------------------------------------------------------
@@ -238,6 +255,7 @@
     - `:pool`          — transport pool options (connect-timeout, version,
                          redirect-policy, ...). Builds a dedicated HTTP
                          client used for every request from this client.
+                         JVM only; ignored on ClojureScript.
     - `:transport`     — pre-built `supabase.core.transport/Transport`.
                          Overrides `:pool` if both are given.
     - `:log?`          — when true, request/response logging is enabled
@@ -270,12 +288,13 @@
         storage-key (or (get-in opts [:auth :storage-key])
                         (default-storage-key base-url))
         client-info (merge {"supabase-clj" version} (:client-info opts))
-        pool-opts (:pool opts)
         ;; Explicit :transport > :pool-derived transport > nothing (resolves
-        ;; to default-transport at request time).
+        ;; to default-transport at request time). Pooling is JVM-only; on
+        ;; ClojureScript the browser/Node runtime owns connection reuse.
         explicit-transport (:transport opts)
-        derived-transport (when (and (nil? explicit-transport) pool-opts)
-                            (transport/hato-transport pool-opts))
+        derived-transport #?(:clj (when (and (nil? explicit-transport) (:pool opts))
+                                    (transport/hato-transport (:pool opts)))
+                             :cljs nil)
         chosen-transport (or explicit-transport derived-transport)
         client-map (cond-> (merge {:db (or (:db opts) {})
                                    :storage (or (:storage opts) {})}

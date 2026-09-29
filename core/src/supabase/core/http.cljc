@@ -3,7 +3,8 @@
 
   Requests are built as plain maps using a threading-friendly API, then
   executed through a [[supabase.core.transport/Transport]]. The default
-  transport wraps Hato; tests and integrators can swap it.
+  transport wraps Hato on the JVM and `js/fetch` on ClojureScript; tests
+  and integrators can swap it.
 
   ## Request map
 
@@ -16,6 +17,7 @@
     - `:body`          — request body (map, string, bytes, File, InputStream, or nil)
     - `:multipart`     — vector of multipart parts (mutually exclusive with `:body`)
     - `:response-as`   — `:string` (default), `:byte-array`, `:stream`, `:reader`
+                         (`:stream` and `:reader` are JVM-only)
     - `:decoder`       — fn from raw body to parsed body (default JSON for `:string`)
     - `:error-parser`  — fn `[status body headers service]` → anomaly map
     - `:log?`          — emit debug/error log lines for this request
@@ -41,31 +43,43 @@
       ;; => {:status 200, :body {...}, :headers {...}} on success
       ;; => anomaly map on HTTP error (status >= 400)
 
-      ;; Streaming response (no decoding)
-      (-> (http/request client)
-          (http/with-service-url :storage-url \"/object/bucket/path\")
-          (http/with-response-as :stream)
-          (http/execute))
-      ;; => {:status 200, :body #object[java.io.InputStream ...], :headers {...}}
+  ## Platforms
 
-      ;; Multipart upload
-      (-> (http/request client)
-          (http/with-service-url :storage-url \"/object/bucket/path\")
-          (http/with-method :post)
-          (http/with-multipart [{:name \"file\" :content (io/file \"a.png\")
-                                  :content-type \"image/png\" :filename \"a.png\"}])
-          (http/execute))"
+  `execute` is synchronous and JVM-only (ClojureScript throws). On
+  ClojureScript use [[execute-async]], which returns a `js/Promise`
+  instead of a `CompletableFuture`."
   (:require [clojure.string :as str]
-            [clojure.tools.logging :as log]
-            [jsonista.core :as json]
+            #?@(:clj [[clojure.tools.logging :as log]])
             [supabase.core.client :as client]
             [supabase.core.error :as error]
+            [supabase.core.json :as json]
             [supabase.core.retry :as retry]
             [supabase.core.transport :as transport])
-  (:import (java.io InputStream)
-           (java.util.concurrent CompletableFuture CancellationException TimeUnit)))
+  #?(:clj (:import (java.io InputStream)
+                   (java.util.concurrent CompletableFuture CancellationException TimeUnit))))
 
-(def ^:private json-mapper (json/object-mapper {:decode-key-fn true}))
+;; ---------------------------------------------------------------------------
+;; Platform helpers
+;; ---------------------------------------------------------------------------
+
+(defn- now-ms
+  "Monotonic-ish clock in milliseconds for elapsed-time measurements."
+  []
+  #?(:clj  (long (/ (System/nanoTime) 1000000))
+     :cljs (.getTime (js/Date.))))
+
+(defn- logf
+  "Logs a pre-rendered message: `clojure.tools.logging` on the JVM,
+  `js/console` on ClojureScript."
+  [level msg]
+  #?(:clj  (case level
+             :debug (log/debug msg)
+             :error (log/error msg)
+             :warn  (log/warn msg))
+     :cljs (case level
+             :debug (js/console.debug msg)
+             :error (js/console.error msg)
+             :warn  (js/console.warn msg))))
 
 ;; ---------------------------------------------------------------------------
 ;; Request construction
@@ -121,7 +135,7 @@
 
     - Map → JSON-encoded and `content-type: application/json` is set.
     - String → passed through as-is.
-    - `byte[]` / `File` / `InputStream` → passed through as-is. Caller is
+    - `byte[]` / `File` / `InputStream` (JVM) → passed through as-is. Caller is
       responsible for setting `content-type`.
     - nil → cleared."
   [req body]
@@ -131,7 +145,7 @@
 
     (map? body)
     (-> req
-        (assoc :body (json/write-value-as-string body))
+        (assoc :body (json/write-string body))
         (update :headers assoc "content-type" "application/json"))
 
     :else
@@ -146,9 +160,9 @@
        :content      <File | InputStream | byte[] | String>  ;; required
        :content-type \"image/png\"             ;; optional
        :filename     \"a.png\"                 ;; optional, becomes filename=
-       :encoding     \"UTF-8\"}                ;; optional charset
+       :encoding     \"UTF-8\"}                ;; optional charset (JVM only)
 
-  Hato is responsible for assembling the multipart body and setting the
+  The transport assembles the multipart body and sets the
   `multipart/form-data` content-type with boundary."
   [req parts]
   (-> req
@@ -182,9 +196,10 @@
 
     - `:string` (default) — UTF-8 string. Decoded by [[with-decoder]]
       (JSON by default).
-    - `:byte-array` — raw bytes. No decoding.
-    - `:stream`     — `java.io.InputStream`. No decoding. Caller closes.
-    - `:reader`     — `java.io.Reader`. No decoding. Caller closes.
+    - `:byte-array` — raw bytes (`js/Uint8Array` on ClojureScript).
+      No decoding.
+    - `:stream`     — `java.io.InputStream`. JVM only. No decoding.
+    - `:reader`     — `java.io.Reader`. JVM only. No decoding.
 
   Non-string bodies skip the default JSON decode step."
   [req as]
@@ -237,22 +252,14 @@
 (defn with-logging
   "Enables or disables structured request/response logging for this
   request. When the request map (or its client) has `:log? true`,
-  `clojure.tools.logging` emits a debug line on dispatch and on
-  success, plus an error line on failure."
+  a debug line is emitted on dispatch and on success, plus an error line
+  on failure."
   ([req] (with-logging req true))
   ([req on?] (assoc req :log? on?)))
 
 ;; ---------------------------------------------------------------------------
 ;; Response handling
 ;; ---------------------------------------------------------------------------
-
-(defn- json-decode-safe
-  "Best-effort JSON decode. Returns raw body on parse failure."
-  [body]
-  (if (string? body)
-    (try (json/read-value body json-mapper)
-         (catch Exception _ body))
-    body))
 
 (defn- decode-body
   "Decodes a response body based on `response-as` and an optional
@@ -265,7 +272,7 @@
       ;; Caller-supplied decoder wins
       decoder (decoder body)
       ;; Default: JSON decode strings, pass through everything else
-      :else (json-decode-safe body))))
+      :else (json/read-string-safe body))))
 
 (defn- default-error-parser
   "Adapter that delegates to `supabase.core.error/from-http-response`,
@@ -286,7 +293,7 @@
        :headers headers}
       ;; Errors always parse the body as JSON so the caller gets a
       ;; structured anomaly even when the request expected binary.
-      (parser status (json-decode-safe body) headers service))))
+      (parser status (json/read-string-safe body) headers service))))
 
 ;; ---------------------------------------------------------------------------
 ;; Request preparation
@@ -298,17 +305,15 @@
 
 (defn- log-request [req]
   (when (log-enabled? req)
-    (log/debugf "supabase %s %s %s" (:service req) (:method req) (:url req))))
+    (logf :debug (str "supabase " (:service req) " " (:method req) " " (:url req)))))
 
 (defn- log-response [req resp elapsed-ms]
   (when (log-enabled? req)
     (if (error/anomaly? resp)
-      (log/errorf "supabase %s %s %s -> anomaly %s in %dms"
-                  (:service req) (:method req) (:url req)
-                  (:supabase/code resp) elapsed-ms)
-      (log/debugf "supabase %s %s %s -> %d in %dms"
-                  (:service req) (:method req) (:url req)
-                  (:status resp) elapsed-ms))))
+      (logf :error (str "supabase " (:service req) " " (:method req) " " (:url req)
+                        " -> anomaly " (:supabase/code resp) " in " elapsed-ms "ms"))
+      (logf :debug (str "supabase " (:service req) " " (:method req) " " (:url req)
+                        " -> " (:status resp) " in " elapsed-ms "ms")))))
 
 (defn- build-transport-request
   "Transforms an internal request map into the lower-level map the
@@ -319,6 +324,7 @@
            :headers headers
            :as (or response-as :string)
            ;; Hato throws on >= 400 by default. Disable so we can map to anomalies.
+           ;; js/fetch never throws on HTTP error status.
            :throw-exceptions? false}
     (seq query)  (assoc :query-params query)
     body         (assoc :body body)
@@ -344,8 +350,8 @@
   (when-let [f (event-fn req)]
     (try
       (f event)
-      (catch Exception e
-        (log/warnf "supabase :on-event handler threw: %s" (ex-message e))))))
+      (catch #?(:clj Exception :cljs :default) e
+        (logf :warn (str "supabase :on-event handler threw: " (ex-message e)))))))
 
 (defn- base-event [req attempt]
   {:event   nil ;; set by caller
@@ -370,10 +376,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- retryable-request?
-  "Requests with non-replayable bodies (InputStream) or multipart payloads
-  are never retried: the body cannot be re-sent."
+  "Requests with non-replayable bodies (InputStream on the JVM) or
+  multipart payloads are never retried: the body cannot be re-sent."
   [req]
-  (and (not (instance? InputStream (:body req)))
+  (and #?(:clj  (not (instance? InputStream (:body req)))
+          :cljs true)
        (not (:multipart req))))
 
 (defn- retry-opts
@@ -396,136 +403,189 @@
 ;; Execution
 ;; ---------------------------------------------------------------------------
 
-(defn- attempt-sync
-  "Executes one attempt synchronously, converting transport exceptions to
-  anomalies."
-  [req t]
-  (try
-    (handle-response (transport/execute t (build-transport-request req)) req)
-    (catch Exception e
-      (error/from-exception e (:service req)))))
+#?(:clj
+   (defn- attempt-sync
+     "Executes one attempt synchronously, converting transport exceptions to
+     anomalies."
+     [req t]
+     (try
+       (handle-response (transport/execute t (build-transport-request req)) req)
+       (catch Exception e
+         (error/from-exception e (:service req))))))
 
-(defn execute
-  "Executes the request synchronously through the configured transport.
+#?(:clj
+   (defn execute
+     "Executes the request synchronously through the configured transport.
+     JVM only — on ClojureScript use [[execute-async]].
 
-  Returns a response map on success (status < 400) or an anomaly map on
-  error.
+     Returns a response map on success (status < 400) or an anomaly map on
+     error.
 
-  ## Retries
+     ## Retries
 
-  When retries are enabled (client or request `:retries`), transient
-  failures — status 429/502/503/504 and transient transport exceptions —
-  are retried with exponential backoff and jitter, honoring `Retry-After`.
-  Requests with non-replayable bodies (InputStream, multipart) are never
-  retried.
+     When retries are enabled (client or request `:retries`), transient
+     failures — status 429/502/503/504 and transient transport exceptions —
+     are retried with exponential backoff and jitter, honoring `Retry-After`.
+     Requests with non-replayable bodies (InputStream, multipart) are never
+     retried.
 
-  ## Telemetry
+     ## Telemetry
 
-  When `:on-event` is set on the request or client, it receives
-  `:request-start` (per attempt), `:request-retry` (per backoff), and
-  `:request-end` (once) event maps.
+     When `:on-event` is set on the request or client, it receives
+     `:request-start` (per attempt), `:request-retry` (per backoff), and
+     `:request-end` (once) event maps.
 
-  ## Logging
+     ## Logging
 
-  When `:log?` is true on the request map or the client, a debug line is
-  emitted on dispatch and an error/debug line on completion."
-  [req]
-  (log-request req)
-  (let [t (transport/resolve-transport req)
-        opts (retry-opts req)
-        max-attempts (or (:max-attempts opts) 1)]
-    (loop [attempt 1]
-      (emit! req (assoc (base-event req attempt) :event :request-start))
-      (let [start (System/nanoTime)
-            result (attempt-sync req t)
-            elapsed (long (/ (- (System/nanoTime) start) 1000000))]
-        (if (and opts (< attempt max-attempts) (transient-result? result))
-          (let [delay (retry/next-delay-ms attempt (:http/headers result) opts)]
-            (emit! req (assoc (base-event req attempt)
-                              :event :request-retry
-                              :delay-ms delay
-                              :status (:http/status result)
-                              :code (:supabase/code result)))
-            (log/debugf "supabase %s %s %s -> transient, retrying in %dms (attempt %d/%d)"
-                        (:service req) (:method req) (:url req) delay (inc attempt) max-attempts)
-            (Thread/sleep (long delay))
-            (recur (inc attempt)))
-          (do (log-response req result elapsed)
-              (emit! req (end-event req result attempt elapsed))
-              result))))))
+     When `:log?` is true on the request map or the client, a debug line is
+     emitted on dispatch and an error/debug line on completion."
+     [req]
+     (log-request req)
+     (let [t (transport/resolve-transport req)
+           opts (retry-opts req)
+           max-attempts (or (:max-attempts opts) 1)]
+       (loop [attempt 1]
+         (emit! req (assoc (base-event req attempt) :event :request-start))
+         (let [start (now-ms)
+               result (attempt-sync req t)
+               elapsed (- (now-ms) start)]
+           (if (and opts (< attempt max-attempts) (transient-result? result))
+             (let [delay (retry/next-delay-ms attempt (:http/headers result) opts)]
+               (emit! req (assoc (base-event req attempt)
+                                 :event :request-retry
+                                 :delay-ms delay
+                                 :status (:http/status result)
+                                 :code (:supabase/code result)))
+               (logf :debug (str "supabase " (:service req) " " (:method req) " " (:url req)
+                                 " -> transient, retrying in " delay "ms (attempt "
+                                 (inc attempt) "/" max-attempts ")"))
+               (Thread/sleep (long delay))
+               (recur (inc attempt)))
+             (do (log-response req result elapsed)
+                 (emit! req (end-event req result attempt elapsed))
+                 result)))))))
 
-(defn execute!
-  "Like [[execute]], but throws an `ex-info` on error.
+#?(:cljs
+   (defn execute
+     "Synchronous execution is not available on ClojureScript (fetch is
+     async-only). Throws; use [[execute-async]]."
+     [_]
+     (throw (js/Error. "supabase: synchronous execute is not available on ClojureScript; use execute-async"))))
 
-  The anomaly map is attached as the ex-data of the thrown exception."
-  [req]
-  (let [result (execute req)]
-    (if (error/anomaly? result)
-      (throw (ex-info (or (:cognitect.anomalies/message result) "Request failed") result))
-      result)))
+#?(:clj
+   (defn execute!
+     "Like [[execute]], but throws an `ex-info` on error. JVM only.
 
-(defn execute-async
-  "Executes the request asynchronously. Returns a `CompletableFuture`
-  that resolves to the same value [[execute]] would return.
+     The anomaly map is attached as the ex-data of the thrown exception."
+     [req]
+     (let [result (execute req)]
+       (if (error/anomaly? result)
+         (throw (ex-info (or (:cognitect.anomalies/message result) "Request failed") result))
+         result))))
 
-  Retries and telemetry follow the same rules as [[execute]]; backoff
-  delays are scheduled on a delayed executor, not slept on a thread.
+#?(:clj
+   (defn execute-async
+     "Executes the request asynchronously. Returns a `CompletableFuture`
+     that resolves to the same value [[execute]] would return.
 
-  ## Cancellation
+     Retries and telemetry follow the same rules as [[execute]]; backoff
+     delays are scheduled on a delayed executor, not slept on a thread.
 
-  The returned future is cancellable: calling `(future-cancel fut)` (or
-  `(.cancel fut true)`) aborts the in-flight HTTP request by cancelling
-  the underlying transport future. Useful to wire a core.async
-  `:cancel-ch` or any external cancel signal:
+     ## Cancellation
 
-      (def fut (http/execute-async req))
-      ;; later, on some signal:
-      (future-cancel fut)"
-  [req]
-  (log-request req)
-  (let [t (transport/resolve-transport req)
-        opts (retry-opts req)
-        max-attempts (or (:max-attempts opts) 1)
-        start (System/nanoTime)
-        result (CompletableFuture.)
-        ;; Latest in-flight transport future, so cancelling `result` aborts
-        ;; whichever attempt is currently on the wire.
-        current-raw (atom nil)
-        finish (fn [value attempt]
-                 (let [elapsed (long (/ (- (System/nanoTime) start) 1000000))]
+     The returned future is cancellable: calling `(future-cancel fut)` (or
+     `(.cancel fut true)`) aborts the in-flight HTTP request by cancelling
+     the underlying transport future. Useful to wire a core.async
+     `:cancel-ch` or any external cancel signal:
+
+         (def fut (http/execute-async req))
+         ;; later, on some signal:
+         (future-cancel fut)"
+     [req]
+     (log-request req)
+     (let [t (transport/resolve-transport req)
+           opts (retry-opts req)
+           max-attempts (or (:max-attempts opts) 1)
+           start (now-ms)
+           result (CompletableFuture.)
+           ;; Latest in-flight transport future, so cancelling `result` aborts
+           ;; whichever attempt is currently on the wire.
+           current-raw (atom nil)
+           finish (fn [value attempt]
+                    (let [elapsed (- (now-ms) start)]
+                      (log-response req value elapsed)
+                      (emit! req (end-event req value attempt elapsed))
+                      (.complete result value)))]
+       (letfn [(dispatch [attempt]
+                 (emit! req (assoc (base-event req attempt) :event :request-start))
+                 (let [raw (transport/execute-async t (build-transport-request req))]
+                   (reset! current-raw raw)
+                   (.whenComplete
+                    ^CompletableFuture raw
+                    (reify java.util.function.BiConsumer
+                      (accept [_ resp ex]
+                        (when-not (.isCancelled result)
+                          (let [value (if ex
+                                        (error/from-exception (or (.getCause ^Throwable ex) ex)
+                                                              (:service req))
+                                        (handle-response resp req))]
+                            (if (and opts (< attempt max-attempts) (transient-result? value))
+                              (let [delay (retry/next-delay-ms attempt (:http/headers value) opts)]
+                                (emit! req (assoc (base-event req attempt)
+                                                  :event :request-retry
+                                                  :delay-ms delay
+                                                  :status (:http/status value)
+                                                  :code (:supabase/code value)))
+                                (-> (CompletableFuture/runAsync
+                                     ^Runnable (fn [])
+                                     (CompletableFuture/delayedExecutor (long delay) TimeUnit/MILLISECONDS))
+                                    (.thenRun ^Runnable (fn [] (dispatch (inc attempt))))))
+                              (finish value attempt)))))))))]
+         (dispatch 1))
+       (.whenComplete
+        result
+        (reify java.util.function.BiConsumer
+          (accept [_ _ ex]
+            (when (instance? CancellationException ex)
+              (some-> @current-raw future-cancel)))))
+       result)))
+
+#?(:cljs
+   (defn execute-async
+     "Executes the request asynchronously. Returns a `js/Promise` that
+     resolves to a response map on success (status < 400) or an anomaly
+     map on error. The promise never rejects: transport failures become
+     anomalies, mirroring the JVM contract.
+
+     Retries and telemetry follow the same rules as the JVM; backoff
+     delays are scheduled with `js/setTimeout`."
+     [req]
+     (log-request req)
+     (let [t (transport/resolve-transport req)
+           opts (retry-opts req)
+           max-attempts (or (:max-attempts opts) 1)
+           start (now-ms)]
+       (letfn [(finish [value attempt]
+                 (let [elapsed (- (now-ms) start)]
                    (log-response req value elapsed)
                    (emit! req (end-event req value attempt elapsed))
-                   (.complete result value)))]
-    (letfn [(dispatch [attempt]
-              (emit! req (assoc (base-event req attempt) :event :request-start))
-              (let [raw (transport/execute-async t (build-transport-request req))]
-                (reset! current-raw raw)
-                (.whenComplete
-                 ^CompletableFuture raw
-                 (reify java.util.function.BiConsumer
-                   (accept [_ resp ex]
-                     (when-not (.isCancelled result)
-                       (let [value (if ex
-                                     (error/from-exception (or (.getCause ^Throwable ex) ex)
-                                                           (:service req))
-                                     (handle-response resp req))]
-                         (if (and opts (< attempt max-attempts) (transient-result? value))
-                           (let [delay (retry/next-delay-ms attempt (:http/headers value) opts)]
-                             (emit! req (assoc (base-event req attempt)
-                                               :event :request-retry
-                                               :delay-ms delay
-                                               :status (:http/status value)
-                                               :code (:supabase/code value)))
-                             (-> (CompletableFuture/runAsync
-                                  ^Runnable (fn [])
-                                  (CompletableFuture/delayedExecutor (long delay) TimeUnit/MILLISECONDS))
-                                 (.thenRun ^Runnable (fn [] (dispatch (inc attempt))))))
-                           (finish value attempt)))))))))]
-      (dispatch 1))
-    (.whenComplete
-     result
-     (reify java.util.function.BiConsumer
-       (accept [_ _ ex]
-         (when (instance? CancellationException ex)
-           (some-> @current-raw future-cancel)))))
-    result))
+                   (js/Promise.resolve value)))
+               (dispatch [attempt]
+                 (emit! req (assoc (base-event req attempt) :event :request-start))
+                 (-> (transport/execute-async t (build-transport-request req))
+                     (.then (fn [resp] (handle-response resp req))
+                            (fn [err] (error/from-exception err (:service req))))
+                     (.then (fn [value]
+                              (if (and opts (< attempt max-attempts) (transient-result? value))
+                                (let [delay (retry/next-delay-ms attempt (:http/headers value) opts)]
+                                  (emit! req (assoc (base-event req attempt)
+                                                    :event :request-retry
+                                                    :delay-ms delay
+                                                    :status (:http/status value)
+                                                    :code (:supabase/code value)))
+                                  (js/Promise.
+                                   (fn [resolve _]
+                                     (js/setTimeout (fn [] (.then (dispatch (inc attempt)) resolve))
+                                                    delay))))
+                                (finish value attempt))))))]
+         (dispatch 1)))))

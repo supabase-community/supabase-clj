@@ -2,6 +2,11 @@
 
 Core module for the Supabase Clojure SDK. Provides client configuration, HTTP request building, and error handling used by all service modules.
 
+Runs on the **JVM** and **ClojureScript** (browser and Node.js >= 18). On
+ClojureScript the default transport is `js/fetch` and HTTP execution is
+async-only: use `supabase.core.http/execute-async`, which returns a
+`js/Promise` instead of a `CompletableFuture`.
+
 ## Installation
 
 ```clojure
@@ -87,8 +92,22 @@ Composable HTTP request builder and executor.
 (http/execute! req)  ;; throws ex-info on error
 
 ;; Async variant
-@(http/execute-async req)  ;; returns CompletableFuture
+@(http/execute-async req)  ;; returns CompletableFuture (js/Promise on ClojureScript)
 ```
+
+### `supabase.core.transport`
+
+Transport protocol and default implementations. Hato on the JVM (with
+per-client `HttpClient` pooling via `:pool` client option), `js/fetch`
+on ClojureScript (timeouts enforced with an `AbortController`). Implement
+`supabase.core.transport/Transport` and pass it via the `:transport`
+client option or `http/with-transport` to plug in any HTTP stack.
+
+### `supabase.core.json`
+
+Platform JSON seam: jsonista on the JVM, `js/JSON` on ClojureScript.
+Used internally; service modules should call it rather than a JSON
+library directly so they stay platform-portable.
 
 #### Retries
 
@@ -184,11 +203,14 @@ clojure -M:test
 # Run specific test namespace
 clojure -M:test --focus supabase.core.client-test
 
+# Run ClojureScript tests (shadow-cljs node-test, requires Node.js)
+clojure -M:cljs compile node-test && node target/node-tests.js
+
 # Check formatting (cljfmt)
-clojure -M:fmt check src test
+clojure -M:fmt check src test test-cljs
 
 # Fix formatting
-clojure -M:fmt fix src test
+clojure -M:fmt fix src test test-cljs
 ```
 
 ## License

@@ -16,3 +16,7 @@ result
 
 # OS
 .DS_Store
+
+# shadow-cljs
+.shadow-cljs/
+test-cljs/builds/

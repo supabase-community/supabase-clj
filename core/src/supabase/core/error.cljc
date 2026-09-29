@@ -166,11 +166,13 @@
         (do-something)
         (catch Exception e
           (error/from-exception e :auth)))"
-  ([^Throwable ex]
+  ([ex]
    (from-exception ex nil))
-  ([^Throwable ex service]
-   (cond-> {:cognitect.anomalies/category :cognitect.anomalies/fault
-            :cognitect.anomalies/message (.getMessage ex)
-            :supabase/code :exception
-            :exception ex}
-     service (assoc :supabase/service service))))
+  ([ex service]
+   (let [message #?(:clj  (.getMessage ^Throwable ex)
+                    :cljs (.-message ex))]
+     (cond-> {:cognitect.anomalies/category :cognitect.anomalies/fault
+              :cognitect.anomalies/message message
+              :supabase/code :exception
+              :exception ex}
+       service (assoc :supabase/service service)))))

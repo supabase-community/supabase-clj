@@ -36,11 +36,11 @@
       (retry/next-delay-ms 2 {\"retry-after\" \"3\"}) ;; => 3000
       (retry/merge-opts {:max-attempts 5} true)  ;; => {:max-attempts 5, ...}"
   (:require [clojure.string :as str])
-  (:import (java.io EOFException)
-           (java.net ConnectException NoRouteToHostException SocketException)
-           (java.net.http HttpConnectTimeoutException HttpTimeoutException)
-           (java.time Instant ZonedDateTime)
-           (java.time.format DateTimeFormatter DateTimeParseException)))
+  #?(:clj (:import (java.io EOFException)
+                   (java.net ConnectException NoRouteToHostException SocketException)
+                   (java.net.http HttpConnectTimeoutException HttpTimeoutException)
+                   (java.time ZonedDateTime)
+                   (java.time.format DateTimeFormatter DateTimeParseException))))
 
 ;; ---------------------------------------------------------------------------
 ;; Options
@@ -62,36 +62,59 @@
   [status]
   (contains? #{429 502 503 504} status))
 
-(defn- socket-transient-message?
-  "True when a SocketException message indicates a reset or broken pipe."
-  [^String msg]
-  (and (some? msg)
-       (let [m (str/lower-case msg)]
-         (or (str/includes? m "connection reset")
-             (str/includes? m "broken pipe")))))
+#?(:clj
+   (defn- socket-transient-message?
+     "True when a SocketException message indicates a reset or broken pipe."
+     [^String msg]
+     (and (some? msg)
+          (let [m (str/lower-case msg)]
+            (or (str/includes? m "connection reset")
+                (str/includes? m "broken pipe"))))))
 
-(defn- transient-single-exception?
-  "True when a single exception (no cause walk) is transient."
-  [^Throwable ex]
-  (or (instance? ConnectException ex)
-      (instance? HttpConnectTimeoutException ex)
-      (instance? HttpTimeoutException ex)
-      (instance? NoRouteToHostException ex)
-      (instance? EOFException ex)
-      (and (instance? SocketException ex)
-           (socket-transient-message? (.getMessage ex)))))
+#?(:clj
+   (defn- transient-single-exception?
+     "True when a single exception (no cause walk) is transient."
+     [^Throwable ex]
+     (or (instance? ConnectException ex)
+         (instance? HttpConnectTimeoutException ex)
+         (instance? HttpTimeoutException ex)
+         (instance? NoRouteToHostException ex)
+         (instance? EOFException ex)
+         (and (instance? SocketException ex)
+              (socket-transient-message? (.getMessage ex))))))
+
+#?(:cljs
+   (defn- transient-single-exception?
+     "True when a single exception (no cause walk) is transient.
+
+     On ClojureScript the fetch transport surfaces network failures as
+     `TypeError` (DNS, conn refused, reset) and request timeouts as
+     `AbortError` (see `supabase.core.transport/FetchTransport`)."
+     [ex]
+     (contains? #{"TypeError" "AbortError"} (.-name ex))))
+
+(defn- exception-cause-chain
+  "Lazy seq of `ex` and its causes, portable across platforms."
+  [ex]
+  (take-while some? (iterate #?(:clj  #(.getCause ^Throwable %)
+                                :cljs #(.-cause ^js %)) ex)))
 
 (defn transient-exception?
-  "True for exceptions that indicate a transient transport failure:
-  `java.net.ConnectException`, `java.net.http.HttpConnectTimeoutException`,
-  `java.net.http.HttpTimeoutException`, `java.net.NoRouteToHostException`,
-  `java.net.SocketException` whose message contains \"Connection reset\" or
-  \"Broken pipe\" (case-insensitive), and `java.io.EOFException`.
+  "True for exceptions that indicate a transient transport failure.
+
+  On the JVM: `java.net.ConnectException`,
+  `java.net.http.HttpConnectTimeoutException`,
+  `java.net.http.HttpTimeoutException`,
+  `java.net.NoRouteToHostException`, `java.net.SocketException` whose
+  message contains \"Connection reset\" or \"Broken pipe\"
+  (case-insensitive), and `java.io.EOFException`.
+
+  On ClojureScript: `TypeError` and `AbortError` from `js/fetch`.
 
   Walks the cause chain, so a transient failure wrapped in another exception
   (for example via `ex-info`) is still detected."
-  [^Throwable ex]
-  (boolean (some transient-single-exception? (take-while some? (iterate #(.getCause ^Throwable %) ex)))))
+  [ex]
+  (boolean (some transient-single-exception? (exception-cause-chain ex))))
 
 ;; ---------------------------------------------------------------------------
 ;; Retry-After header
@@ -99,19 +122,38 @@
 
 (defn- parse-long-safe
   "Parses `s` as a long, returning nil on failure."
-  [^String s]
+  [s]
   (try
-    (Long/parseLong (str/trim s))
-    (catch NumberFormatException _ nil)))
+    #?(:clj  (Long/parseLong (str/trim s))
+       :cljs (let [n (js/parseInt (str/trim s) 10)]
+               (when-not (js/isNaN n) n)))
+    (catch #?(:clj NumberFormatException :cljs :default) _ nil)))
 
-(defn- http-date-ms
-  "Milliseconds from now until the given RFC 1123 HTTP-date, clamped at >= 0.
-  Returns nil when the value is not a parseable HTTP-date."
-  [^String s]
-  (try
-    (let [target (.toInstant (ZonedDateTime/parse s DateTimeFormatter/RFC_1123_DATE_TIME))]
-      (max 0 (- (.toEpochMilli target) (.toEpochMilli (Instant/now)))))
-    (catch DateTimeParseException _ nil)))
+(defn- now-ms
+  "Current wall-clock time in milliseconds."
+  []
+  #?(:clj  (System/currentTimeMillis)
+     :cljs (.getTime (js/Date.))))
+
+#?(:clj
+   (defn- http-date-ms
+     "Milliseconds from now until the given RFC 1123 HTTP-date, clamped at >= 0.
+     Returns nil when the value is not a parseable HTTP-date."
+     [s]
+     (try
+       (let [target-ms (-> (ZonedDateTime/parse s DateTimeFormatter/RFC_1123_DATE_TIME)
+                           .toInstant
+                           .toEpochMilli)]
+         (max 0 (- target-ms (now-ms))))
+       (catch DateTimeParseException _ nil)))
+   :cljs
+   (defn- http-date-ms
+     "Milliseconds from now until the given RFC 1123 HTTP-date, clamped at >= 0.
+     Returns nil when the value is not a parseable HTTP-date."
+     [s]
+     (let [target-ms (js/Date.parse s)]
+       (when-not (js/isNaN target-ms)
+         (max 0 (- target-ms (now-ms)))))))
 
 (defn retry-after-ms
   "Parses a Retry-After header value from a response headers map.
@@ -148,7 +190,8 @@
    (backoff-ms attempt nil))
   ([attempt opts]
    (let [{:keys [initial-delay-ms max-delay-ms multiplier]} (merge default-opts opts)
-         cap (min max-delay-ms (* initial-delay-ms (Math/pow multiplier (dec attempt))))]
+         cap (min max-delay-ms (* initial-delay-ms
+                                  (#?(:clj Math/pow :cljs js/Math.pow) multiplier (dec attempt))))]
      (long (rand (inc (long cap)))))))
 
 (defn next-delay-ms
