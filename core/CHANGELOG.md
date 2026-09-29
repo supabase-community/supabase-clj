@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.7.0...core-v0.8.0) (2026-09-29)
+
+
+### Features
+
+* **core:** ClojureScript support via CLJC split ([9a2140f](https://github.com/supabase-community/supabase-clj/commit/9a2140f6db33938eade3ce14fe52522a568d0d22))
+
 ## [0.7.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.6.1...core-v0.7.0) (2026-08-18)
 
 

@@ -11,7 +11,7 @@ async-only: use `supabase.core.http/execute-async`, which returns a
 
 ```clojure
 ;; deps.edn
-{:deps {io.github.supabase-community/core {:mvn/version "0.7.0"}}} ;; x-release-please-version
+{:deps {io.github.supabase-community/core {:mvn/version "0.8.0"}}} ;; x-release-please-version
 ```
 
 ## Quick Start
