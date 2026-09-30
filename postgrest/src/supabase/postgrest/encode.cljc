@@ -13,8 +13,8 @@
           (pg/contains \"tags\" (enc/pg-array [\"vip\" \"weekend\"]))
           (pg/execute))"
   (:require [clojure.string :as str])
-  (:import (java.time Instant)
-           (java.util Date)))
+  #?(:clj (:import (java.time Instant)
+                   (java.util Date))))
 
 (defn- quote-elem
   "Quotes a single array element when it contains characters that would
@@ -32,13 +32,17 @@
   (str "{" (str/join "," (map #(if (nil? %) "NULL" (quote-elem %)) xs)) "}"))
 
 (defn ->iso
-  "Encodes a timestamp as ISO-8601. Accepts `java.time.Instant`,
-  `java.util.Date`, or a string (passed through)."
+  "Encodes a timestamp as ISO-8601. Accepts `java.time.Instant` or
+  `java.util.Date` on the JVM, `js/Date` on ClojureScript, or a string
+  (passed through)."
   [t]
-  (cond
-    (instance? Instant t) (.toString ^Instant t)
-    (instance? Date t)    (.toString (.toInstant ^Date t))
-    :else                 (str t)))
+  #?(:clj  (cond
+             (instance? Instant t) (.toString ^Instant t)
+             (instance? Date t)    (.toString (.toInstant ^Date t))
+             :else                 (str t))
+     :cljs (if (instance? js/Date t)
+             (.toISOString t)
+             (str t))))
 
 (defn pg-range
   "Encodes a range literal. Default bounds `[lo,hi)` (inclusive low,

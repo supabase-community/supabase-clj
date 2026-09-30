@@ -55,7 +55,7 @@
             [supabase.postgrest.query :as query]
             [supabase.postgrest.rls :as rls]
             [supabase.postgrest.transform :as transform])
-  (:import (java.util.concurrent CancellationException CompletableFuture)))
+  #?(:clj (:import (java.util.concurrent CancellationException CompletableFuture))))
 
 ;; ---------------------------------------------------------------------------
 ;; Entry points
@@ -106,37 +106,63 @@
     (assoc req :retries true)
     req))
 
-(defn execute
-  "Runs the built request. Returns `{:status :body :headers}` or an
-  anomaly enriched with PostgREST error metadata."
+(defn- prepare
+  "Applies the pre-execution defaults: idempotent retry policy + schema
+  profile header."
   [req]
-  (if (error/anomaly? req)
-    req
-    (-> req with-default-retries apply-profile-header http/execute pg-error/enrich)))
+  (-> req with-default-retries apply-profile-header))
 
-(defn execute-async
-  "Async variant of [[execute]]. Returns a `CompletableFuture` resolving to
-  the same value [[execute]] would, with PostgREST error enrichment applied.
+#?(:clj
+   (defn execute
+     "Runs the built request. Returns `{:status :body :headers}` or an
+     anomaly enriched with PostgREST error metadata."
+     [req]
+     (if (error/anomaly? req)
+       req
+       (-> req prepare http/execute pg-error/enrich))))
 
-  The future is cancellable: `(future-cancel fut)` aborts the in-flight
-  request (see `supabase.core.http/execute-async`). Wire it to a core.async
-  channel or any external cancel signal:
+#?(:cljs
+   (defn execute
+     "Runs the built request. ClojureScript has no synchronous HTTP, so this
+     returns a `js/Promise` resolving to `{:status :body :headers}` or an
+     anomaly enriched with PostgREST error metadata. Identical to
+     [[execute-async]] on this platform."
+     [req]
+     (if (error/anomaly? req)
+       (js/Promise.resolve req)
+       (-> req prepare http/execute-async (.then pg-error/enrich)))))
 
-      (let [fut (-> (pg/from c \"big_table\") (pg/select \"*\") (pg/execute-async))]
-        ;; on some signal:
-        (future-cancel fut))"
-  [req]
-  (if (error/anomaly? req)
-    (CompletableFuture/completedFuture req)
-    (let [fut (-> req with-default-retries apply-profile-header http/execute-async)
-          out (.thenApply fut (reify java.util.function.Function
-                                (apply [_ r] (pg-error/enrich r))))]
-      ;; Preserve cancellation across the enrichment stage.
-      (.whenComplete out (reify java.util.function.BiConsumer
-                           (accept [_ _ ex]
-                             (when (instance? CancellationException ex)
-                               (future-cancel fut)))))
-      out)))
+#?(:clj
+   (defn execute-async
+     "Async variant of [[execute]]. Returns a `CompletableFuture` resolving to
+     the same value [[execute]] would, with PostgREST error enrichment applied.
+
+     The future is cancellable: `(future-cancel fut)` aborts the in-flight
+     request (see `supabase.core.http/execute-async`). Wire it to a core.async
+     channel or any external cancel signal:
+
+         (let [fut (-> (pg/from c \"big_table\") (pg/select \"*\") (pg/execute-async))]
+           ;; on some signal:
+           (future-cancel fut))"
+     [req]
+     (if (error/anomaly? req)
+       (CompletableFuture/completedFuture req)
+       (let [fut (-> req prepare http/execute-async)
+             out (.thenApply fut (reify java.util.function.Function
+                                   (apply [_ r] (pg-error/enrich r))))]
+         ;; Preserve cancellation across the enrichment stage.
+         (.whenComplete out (reify java.util.function.BiConsumer
+                              (accept [_ _ ex]
+                                (when (instance? CancellationException ex)
+                                  (future-cancel fut)))))
+         out))))
+
+#?(:cljs
+   (defn execute-async
+     "Async variant of [[execute]]. Returns a `js/Promise` resolving to the
+     same value [[execute]] would. On ClojureScript the two are identical."
+     [req]
+     (execute req)))
 
 ;; ---------------------------------------------------------------------------
 ;; OpenAPI
@@ -157,21 +183,27 @@
   Returns `{:status :body :headers}` with the parsed spec under `:body`, or
   an anomaly enriched with PostgREST error metadata. Being idempotent, the
   request follows the same default retry policy as [[execute]].
+  ClojureScript: returns a `js/Promise` of that value.
 
       (pg/get-openapi-spec client)
       (pg/get-openapi-spec client {:schema \"billing\"})"
   ([c] (get-openapi-spec c {}))
   ([c {:keys [schema]}]
-   (or (client/ensure-client c)
-       (-> (http/request c)
-           (http/with-service-url :database-url "/")
-           (assoc :service :postgrest)
-           (http/with-headers {"accept" "application/openapi+json"
-                               "accept-profile" (or schema
-                                                    (get-in c [:db :schema] "public"))})
-           with-default-retries
-           http/execute
-           pg-error/enrich))))
+   (let [req-or-anomaly
+         (or (client/ensure-client c)
+             (-> (http/request c)
+                 (http/with-service-url :database-url "/")
+                 (assoc :service :postgrest)
+                 (http/with-headers {"accept" "application/openapi+json"
+                                     "accept-profile" (or schema
+                                                          (get-in c [:db :schema] "public"))})
+                 with-default-retries))]
+     #?(:clj  (if (error/anomaly? req-or-anomaly)
+                req-or-anomaly
+                (-> req-or-anomaly http/execute pg-error/enrich))
+        :cljs (if (error/anomaly? req-or-anomaly)
+                (js/Promise.resolve req-or-anomaly)
+                (-> req-or-anomaly http/execute-async (.then pg-error/enrich)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Re-exports — flat surface so callers `(pg/eq req col val)` etc.

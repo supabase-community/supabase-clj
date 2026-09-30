@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.4.0...postgrest-v1.5.0) (2026-09-30)
+
+
+### Features
+
+* **postgrest:** ClojureScript support via CLJC split ([#51](https://github.com/supabase-community/supabase-clj/issues/51)) ([9df1b2e](https://github.com/supabase-community/supabase-clj/commit/9df1b2e6c5aa7a6febdfb36eb511aa4958f12751))
+
 ## [1.4.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.3.0...postgrest-v1.4.0) (2026-09-22)
 
 

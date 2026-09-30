@@ -15,8 +15,8 @@
        [:not [:eq \"deleted\" true]]]"
   (:refer-clojure :exclude [filter])
   (:require [clojure.string :as str]
-            [jsonista.core :as json]
-            [supabase.core.http :as http]))
+            [supabase.core.http :as http]
+            [supabase.core.json :as json]))
 
 (def ^:private valid-ops
   #{:eq :gt :gte :lt :lte :neq :like :ilike :match :imatch :in :is
@@ -185,7 +185,7 @@
   (cond
     (string? v) v
     (sequential? v) (str "{" (str/join "," v) "}")
-    (map? v) (json/write-value-as-string v)
+    (map? v) (json/write-string v)
     :else (str v)))
 
 (defn contains
