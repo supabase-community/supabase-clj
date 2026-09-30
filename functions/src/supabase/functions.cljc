@@ -33,8 +33,8 @@
     - `:auto`       — pick a decoder from the response `content-type` (default)
     - `:json`       — always JSON-decode the body
     - `:text`       — always return a UTF-8 string
-    - `:byte-array` — raw `byte[]`
-    - `:stream`     — `java.io.InputStream` (caller closes)
+    - `:byte-array` — raw bytes (`byte[]` on the JVM, `js/Uint8Array` on CLJS)
+    - `:stream`     — `java.io.InputStream` (JVM only, caller closes)
 
   ## Errors
 
@@ -44,13 +44,11 @@
   become `:functions-http-error`. The HTTP body (if any) is preserved
   under `:http/body`."
   (:require [clojure.string :as str]
-            [jsonista.core :as json]
             [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.core.http :as http]
+            [supabase.core.json :as json]
             [supabase.functions.specs :as specs]))
-
-(def ^:private json-mapper (json/object-mapper {:decode-key-fn true}))
 
 ;; ---------------------------------------------------------------------------
 ;; Body encoding
@@ -59,24 +57,35 @@
 (defn- printable-string?
   "Best-effort check: any non-whitespace character below 0x20 flags the
   string as binary-ish, so we send it as `application/octet-stream`."
-  [^String s]
-  (every? (fn [^Character c]
-            (or (Character/isWhitespace c)
-                (>= (int c) 0x20)))
-          s))
+  [s]
+  #?(:clj  (every? (fn [^Character c]
+                     (or (Character/isWhitespace c)
+                         (>= (int c) 0x20)))
+                   s)
+     :cljs (every? (fn [c]
+                     (or (.test #"\s" c)
+                         (>= (.charCodeAt c 0) 0x20)))
+                   s)))
+
+(defn- binary-body?
+  "True for raw binary request bodies: `byte[]` on the JVM, `js/Uint8Array`
+  on ClojureScript."
+  [body]
+  #?(:clj  (bytes? body)
+     :cljs (instance? js/Uint8Array body)))
 
 (defn- default-content-type
   "Picks a content-type for the body or returns nil when the caller
   must set one themselves (Files, InputStreams)."
   [body]
   (cond
-    (nil? body)    nil
-    (map? body)    "application/json"
-    (bytes? body)  "application/octet-stream"
-    (string? body) (if (printable-string? body)
-                     "text/plain"
-                     "application/octet-stream")
-    :else          nil))
+    (nil? body)         nil
+    (map? body)         "application/json"
+    (binary-body? body) "application/octet-stream"
+    (string? body)      (if (printable-string? body)
+                          "text/plain"
+                          "application/octet-stream")
+    :else               nil))
 
 (defn- header-key-name [k]
   (cond
@@ -128,18 +137,16 @@
               headers))))
 
 (defn- json-decode-safe [body]
-  (if (string? body)
-    (try (json/read-value body json-mapper)
-         (catch Exception _ body))
-    body))
+  (json/read-string-safe body))
 
-(defn- pick-hato-as
-  "Hato `:as` value derived from the caller's `:response-as` choice."
+(defn- pick-transport-as
+  "Transport `:as` value derived from the caller's `:response-as` choice.
+  `:stream` is JVM-only; on ClojureScript it degrades to `:byte-array`."
   [response-as]
   (case (or response-as :auto)
     (:auto :json :text) :string
     :byte-array         :byte-array
-    :stream             :stream))
+    :stream             #?(:clj :stream :cljs :byte-array)))
 
 (defn- decode-body
   "Runs the second-pass decoder based on `:response-as` and (for
@@ -192,9 +199,18 @@
     (update-auth client access-token)
     client))
 
+(defn- finalize-response
+  "Applies the `:response-as` second-pass decode to a raw response map."
+  [resp response-as]
+  (if (error/anomaly? resp)
+    resp
+    (let [ct (header (:headers resp) "content-type")]
+      (update resp :body decode-body ct response-as))))
+
 (defn invoke
   "Invokes the Edge Function named `function-name` and returns
   `{:status :body :headers}` on success, an anomaly on failure.
+  ClojureScript: returns a `js/Promise` of that value.
 
   ## Options (all optional)
 
@@ -206,7 +222,8 @@
     - `:method`       — `:get`, `:post` (default), `:put`, `:patch`, `:delete`.
     - `:region`       — region keyword. `:any` is a no-op.
     - `:response-as`  — `:auto` (default), `:json`, `:text`, `:byte-array`,
-                        `:stream`.
+                        `:stream`. `:stream` is JVM-only; on ClojureScript
+                        it degrades to `:byte-array`.
     - `:timeout`      — milliseconds (default 15000).
     - `:access-token` — override the client's access token for this call.
 
@@ -224,7 +241,7 @@
              timeout (or timeout 15000)
              custom-headers (or headers {})
              eff-client (effective-client client opts)
-             hato-as (pick-hato-as response-as)
+             transport-as (pick-transport-as response-as)
              base-req (-> (http/request eff-client)
                           (http/with-service-url :functions-url (str "/" function-name))
                           (http/with-method method)
@@ -233,13 +250,11 @@
                           (http/with-headers custom-headers)
                           ;; Disable core's default JSON decoder; we own decoding here.
                           (http/with-decoder identity)
-                          (http/with-response-as hato-as))
+                          (http/with-response-as transport-as))
              req (cond-> base-req
                    (some? body) (apply-body body custom-headers)
                    (and region (not= :any region))
-                   (http/with-headers {"x-region" (name region)}))
-             resp (http/execute req)]
-         (if (error/anomaly? resp)
-           resp
-           (let [ct (header (:headers resp) "content-type")]
-             (update resp :body decode-body ct response-as)))))))
+                   (http/with-headers {"x-region" (name region)}))]
+         #?(:clj  (finalize-response (http/execute req) response-as)
+            :cljs (-> (http/execute-async req)
+                      (.then (fn [resp] (finalize-response resp response-as)))))))))
