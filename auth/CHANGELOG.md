@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/supabase-community/supabase-clj/compare/auth-v0.6.0...auth-v0.7.0) (2026-09-30)
+
+
+### Features
+
+* **auth:** ClojureScript support via CLJC split + session-store ([#55](https://github.com/supabase-community/supabase-clj/issues/55)) ([d77cfa0](https://github.com/supabase-community/supabase-clj/commit/d77cfa090ed931fd8437d01bd2f85fda20c07502))
+
 ## [0.6.0](https://github.com/supabase-community/supabase-clj/compare/auth-v0.5.0...auth-v0.6.0) (2026-09-22)
 
 
