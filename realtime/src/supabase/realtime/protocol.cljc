@@ -21,22 +21,19 @@
       :presence-state :presence-diff
       :system :heartbeat-reply :unknown"
   (:require [clojure.string :as str]
-            [jsonista.core :as json]))
-
-(def ^:private mapper
-  (json/object-mapper {:decode-key-fn keyword}))
+            [supabase.core.json :as json]))
 
 (defn encode
   "JSON-encodes `frame` to a string."
-  ^String [frame]
-  (json/write-value-as-string frame mapper))
+  [frame]
+  (json/write-string frame))
 
 (defn parse-frame
   "Parses a JSON text frame into a Clojure map with keyword keys.
 
   Payload values are returned as-is (postgres column names stay snake_case)."
   [text]
-  (json/read-value text mapper))
+  (json/read-string text))
 
 ;; ---------------------------------------------------------------------------
 ;; Topic + ref helpers
