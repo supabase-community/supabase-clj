@@ -23,10 +23,10 @@ jobs:
           clj-kondo: latest
 
       - name: Lint all modules
-        run: clj-kondo --lint core/src core/test core/test-cljs auth/src auth/test --fail-level error
+        run: clj-kondo --lint core/src core/test core/test-cljs auth/src auth/test postgrest/src postgrest/test-cljs --fail-level error
 
       - name: Check formatting
-        run: clojure -M:fmt check core/src core/test core/test-cljs auth/src auth/test
+        run: clojure -M:fmt check core/src core/test core/test-cljs auth/src auth/test postgrest/src postgrest/test-cljs
 
   test:
     runs-on: ubuntu-latest
@@ -82,6 +82,12 @@ jobs:
 
       - name: Compile and run core ClojureScript tests
         working-directory: core
+        run: |
+          clojure -M:cljs compile node-test
+          node target/node-tests.js
+
+      - name: Compile and run postgrest ClojureScript tests
+        working-directory: postgrest
         run: |
           clojure -M:cljs compile node-test
           node target/node-tests.js
