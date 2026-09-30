@@ -22,7 +22,9 @@
       (auth/sign-in-with-password c {:email \"user@example.com\" :password \"secure-password\"})
 
   Each function returns `{:status :body :headers}` on success or an anomaly
-  map on failure. See https://supabase.com/docs/reference/javascript/auth-api"
+  map on failure. On ClojureScript every function that issues an HTTP call
+  returns a `js/Promise` of that value instead (fetch is async-only).
+  See https://supabase.com/docs/reference/javascript/auth-api"
   (:require [clojure.string :as str]
             [supabase.auth.errors :as errors]
             [supabase.auth.jwt :as jwt]
@@ -56,16 +58,32 @@
   [req access-token]
   (http/with-headers req {"authorization" (str "Bearer " access-token)}))
 
+(defn- exec
+  "Executes the request: synchronously on the JVM, returning a `js/Promise`
+  on ClojureScript. The async contract never rejects; failures are
+  anomalies, mirroring the JVM."
+  [req]
+  #?(:clj  (http/execute req)
+     :cljs (http/execute-async req)))
+
+(defn- resolve-when
+  "Wraps a plain value so every public fn has one return type per
+  platform: the value itself on the JVM, a resolved `js/Promise` on
+  ClojureScript. Applied to early validation anomalies so callers can
+  always chain `.then`."
+  [v]
+  #?(:clj v :cljs (js/Promise.resolve v)))
+
 (defn- token-sign-in [client schema grant-type credentials body]
-  (or (client/ensure-client client)
-      (specs/ensure-valid schema credentials)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid schema credentials) resolve-when)
       (-> (http/request client)
           (http/with-method :post)
           (http/with-service-url :auth-url token-uri)
           (http/with-query {"grant_type" grant-type})
           (http/with-body body)
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn get-user
   "Retrieves the user profile associated with `access-token`.
@@ -77,13 +95,13 @@
 
       (get-user client \"eyJhbG...\")"
   [client access-token]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url single-user-uri)
           (http/with-headers {"authorization" (str "Bearer " access-token)})
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn sign-up
   "Creates a new user with email/phone and password.
@@ -104,14 +122,14 @@
 
       (sign-up client {:email \"user@example.com\" :password \"secure-password\"})"
   [client credentials]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/SignUpWithPassword credentials)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/SignUpWithPassword credentials) resolve-when)
       (-> (http/request client)
           (http/with-method :post)
           (http/with-service-url :auth-url sign-up-uri)
           (http/with-body (snake-keys (select-keys credentials [:email :phone :password])))
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn sign-in-with-password
   "Authenticates a user with email/phone and password.
@@ -209,8 +227,8 @@
       (sign-in-with-otp client {:phone \"+15555550100\"
                                  :options {:channel \"sms\"}})"
   [client credentials]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/SignInWithOTP credentials)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/SignInWithOTP credentials) resolve-when)
       (let [{:keys [email phone options]} credentials
             {:keys [data channel should-create-user email-redirect-to]} options
             body (cond-> {}
@@ -225,7 +243,7 @@
             (http/with-query (cond-> {} email-redirect-to (assoc "redirect_to" email-redirect-to)))
             (http/with-body body)
             (errors/with-auth-errors)
-            (http/execute)))))
+            exec))))
 
 (defn sign-in-with-sso
   "Initiates SAML single sign-on. Returns a response whose body contains the
@@ -246,8 +264,8 @@
       (sign-in-with-sso client {:domain \"example.org\"})
       (sign-in-with-sso client {:provider-id \"sso-provider-id\"})"
   [client credentials]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/SignInWithSSO credentials)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/SignInWithSSO credentials) resolve-when)
       (let [{:keys [provider-id domain options]} credentials
             redirect-to (:redirect-to options)
             body (cond-> {}
@@ -259,7 +277,7 @@
             (http/with-query (cond-> {} redirect-to (assoc "redirect_to" redirect-to)))
             (http/with-body body)
             (errors/with-auth-errors)
-            (http/execute)))))
+            exec))))
 
 (defn sign-in-anonymously
   "Signs in a user anonymously. Anonymous users can later be converted to
@@ -277,14 +295,14 @@
       (sign-in-anonymously client {})
       (sign-in-anonymously client {:data {:locale \"en-US\"}})"
   [client credentials]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/SignInAnonymously credentials)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/SignInAnonymously credentials) resolve-when)
       (-> (http/request client)
           (http/with-method :post)
           (http/with-service-url :auth-url sign-up-uri)
           (http/with-body (select-keys credentials [:data]))
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn- oauth-query [{:keys [provider options]}]
   (let [{:keys [redirect-to scopes query-params]} options]
@@ -321,8 +339,8 @@
       ;;     :flow-type \"implicit\"
       ;;     :url \"https://abc.supabase.co/auth/v1/authorize?provider=github&redirect_to=...\"}"
   [client credentials]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/SignInWithOAuth credentials)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/SignInWithOAuth credentials) resolve-when)
       (let [base (str (:auth-url client) authorize-uri)
             qs   (->> (oauth-query credentials)
                       (map (fn [[k v]] (str k "=" v)))
@@ -359,8 +377,8 @@
       (verify-otp client {:type \"email\" :email \"a@b.com\" :token \"123456\"})
       (verify-otp client {:type \"email\" :token-hash \"abc...\"})"
   [client params]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/VerifyOtp params)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/VerifyOtp params) resolve-when)
       (let [{:keys [type email phone token token-hash options]} params
             redirect-to (:redirect-to options)
             body (cond-> {:type type}
@@ -374,7 +392,7 @@
             (http/with-query (cond-> {} redirect-to (assoc "redirect_to" redirect-to)))
             (http/with-body body)
             (errors/with-auth-errors)
-            (http/execute)))))
+            exec))))
 
 (defn refresh-session
   "Exchanges a refresh token for a fresh session. The caller is responsible
@@ -384,7 +402,7 @@
 
       (refresh-session client \"<refresh-token>\")"
   [client refresh-token]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (token-sign-in client [:map] "refresh_token" {}
                      {:refresh_token refresh-token})))
 
@@ -402,8 +420,8 @@
 
       (exchange-code-for-session client {:auth-code \"abc\" :code-verifier \"xyz\"})"
   [client params]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/ExchangeCodeForSession params)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/ExchangeCodeForSession params) resolve-when)
       (token-sign-in client [:map] "pkce" {}
                      {:auth_code (:auth-code params)
                       :code_verifier (:code-verifier params)})))
@@ -428,15 +446,15 @@
 
       (update-user client \"<access-token>\" {:password \"new-secret\"})"
   [client access-token attrs]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/UpdateUser attrs)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/UpdateUser attrs) resolve-when)
       (-> (http/request client)
           (http/with-method :put)
           (http/with-service-url :auth-url single-user-uri)
           (with-auth access-token)
           (http/with-body (snake-keys attrs))
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn resend
   "Resends a signup confirmation or OTP for an existing, unconfirmed sign-up
@@ -456,8 +474,8 @@
 
       (resend client {:type \"signup\" :email \"a@b.com\"})"
   [client params]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/Resend params)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/Resend params) resolve-when)
       (let [{:keys [type email phone options]} params
             {:keys [email-redirect-to]} options
             body (cond-> {:type type}
@@ -469,7 +487,7 @@
             (http/with-query (cond-> {} email-redirect-to (assoc "redirect_to" email-redirect-to)))
             (http/with-body body)
             (errors/with-auth-errors)
-            (http/execute)))))
+            exec))))
 
 (defn reset-password-for-email
   "Sends a password-recovery email. Complete the reset by verifying the
@@ -490,8 +508,8 @@
       (reset-password-for-email client \"a@b.com\" {:redirect-to \"https://app/reset\"})"
   ([client email] (reset-password-for-email client email {}))
   ([client email options]
-   (or (client/ensure-client client)
-       (specs/ensure-valid specs/ResetPasswordForEmail {:email email :options options})
+   (or (some-> (client/ensure-client client) resolve-when)
+       (some-> (specs/ensure-valid specs/ResetPasswordForEmail {:email email :options options}) resolve-when)
        (-> (http/request client)
            (http/with-method :post)
            (http/with-service-url :auth-url recover-uri)
@@ -499,7 +517,7 @@
                                     (assoc "redirect_to" (:redirect-to options))))
            (http/with-body {:email email})
            (errors/with-auth-errors)
-           (http/execute)))))
+           exec))))
 
 (defn reauthenticate
   "Sends a reauthentication nonce (OTP) to the user's email or phone. Used
@@ -510,13 +528,13 @@
 
       (reauthenticate client \"<access-token>\")"
   [client access-token]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url reauthenticate-uri)
           (with-auth access-token)
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn get-claims
   "Returns the verified claims of a Supabase JWT.
@@ -528,24 +546,29 @@
   validates the token.
 
   Returns `{:claims {...} :header {...}}` on success, or an anomaly on a
-  malformed/invalid/expired token.
+  malformed/invalid/expired token. ClojureScript: returns a `js/Promise`
+  of that value; local JWKS verification is JVM-only, so every algorithm
+  takes the server-validation path there.
 
   ## Example
 
       (get-claims client \"eyJhbG...\")"
   [client jwt]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (let [decoded (jwt/decode jwt)]
         (if (error/anomaly? decoded)
-          decoded
-          (let [alg (get-in decoded [:header :alg])]
-            (if (jwt/asymmetric-alg? alg)
-              (jwt/verify (:auth-url client) jwt)
-              ;; HS256 / unknown: let the server validate.
-              (let [resp (get-user client jwt)]
-                (if (error/anomaly? resp)
-                  resp
-                  {:claims (:payload decoded) :header (:header decoded)}))))))))
+          (resolve-when decoded)
+          (letfn [(claims-from [resp]
+                    (if (error/anomaly? resp)
+                      resp
+                      {:claims (:payload decoded) :header (:header decoded)}))]
+            #?(:clj  (let [alg (get-in decoded [:header :alg])]
+                       (if (jwt/asymmetric-alg? alg)
+                         (jwt/verify (:auth-url client) jwt)
+                         ;; HS256 / unknown: let the server validate.
+                         (claims-from (get-user client jwt))))
+               ;; Local JWKS verification is JVM-only; the server validates.
+               :cljs (.then (get-user client jwt) claims-from)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Identity linking
@@ -571,15 +594,15 @@
 
       (link-identity client \"<access-token>\" {:provider \"github\"})"
   [client access-token credentials]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/LinkIdentity credentials)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/LinkIdentity credentials) resolve-when)
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url identities-authorize-uri)
           (with-auth access-token)
           (http/with-query (assoc (oauth-query credentials) "skip_http_redirect" "true"))
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn unlink-identity
   "Unlinks the identity `identity-id` from the user identified by
@@ -589,13 +612,13 @@
 
       (unlink-identity client \"<access-token>\" \"<identity-id>\")"
   [client access-token identity-id]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (-> (http/request client)
           (http/with-method :delete)
           (http/with-service-url :auth-url (str identities-uri "/" identity-id))
           (with-auth access-token)
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn get-user-identities
   "Returns the identities linked to the user identified by `access-token`.
@@ -606,10 +629,12 @@
 
       (get-user-identities client \"<access-token>\")"
   [client access-token]
-  (let [resp (get-user client access-token)]
-    (if (error/anomaly? resp)
-      resp
-      (assoc resp :body (get-in resp [:body :identities])))))
+  (letfn [(identities-from [resp]
+            (if (error/anomaly? resp)
+              resp
+              (assoc resp :body (get-in resp [:body :identities]))))]
+    #?(:clj  (identities-from (get-user client access-token))
+       :cljs (.then (get-user client access-token) identities-from))))
 
 ;; ---------------------------------------------------------------------------
 ;; OAuth grants
@@ -627,13 +652,13 @@
 
       (list-oauth-grants client \"<access-token>\")"
   [client access-token]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url oauth-grants-uri)
           (with-auth access-token)
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn revoke-oauth-grant
   "Revokes the user's OAuth grant for the OAuth client `client-id`.
@@ -645,14 +670,14 @@
 
       (revoke-oauth-grant client \"<access-token>\" \"<client-id>\")"
   [client access-token client-id]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (-> (http/request client)
           (http/with-method :delete)
           (http/with-service-url :auth-url oauth-grants-uri)
           (with-auth access-token)
           (http/with-query {"client_id" client-id})
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 ;; ---------------------------------------------------------------------------
 ;; Server observability
@@ -665,12 +690,12 @@
 
       (get-server-health client)"
   [client]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url health-uri)
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn get-server-settings
   "Returns the auth server's advertised settings/capabilities (`GET /settings`).
@@ -679,12 +704,12 @@
 
       (get-server-settings client)"
   [client]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (-> (http/request client)
           (http/with-method :get)
           (http/with-service-url :auth-url settings-uri)
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 ;; ---------------------------------------------------------------------------
 ;; Session lifecycle helpers
@@ -700,7 +725,9 @@
       (get session (keyword (str/replace (name k) "-" "_")))))
 
 (defn- now-secs []
-  (quot (System/currentTimeMillis) 1000))
+  (quot #?(:clj (System/currentTimeMillis)
+           :cljs (.getTime (js/Date.)))
+        1000))
 
 (defn needs-refresh?
   "True when `session` is expired or expires within `:within` seconds
@@ -716,18 +743,25 @@
      (<= (- expires-at (now-secs)) within)
      false)))
 
+(defn- body-or-anomaly
+  "Extracts `:body` from a sign-in/refresh response, passing anomalies
+  through."
+  [resp]
+  (if (error/anomaly? resp)
+    resp
+    (:body resp)))
+
 (defn- refresh-to-session [client session]
-  (let [resp (refresh-session client (session-get session :refresh-token))]
-    (if (error/anomaly? resp)
-      resp
-      (:body resp))))
+  #?(:clj  (body-or-anomaly (refresh-session client (session-get session :refresh-token)))
+     :cljs (.then (refresh-session client (session-get session :refresh-token))
+                  body-or-anomaly)))
 
 (defn refresh-if-needed
   "Refreshes `session` when it is expired or about to expire, otherwise
   returns it unchanged. Useful for proactive refresh in request handlers.
 
   Returns the (possibly new) session map, or an anomaly when the refresh
-  call fails.
+  call fails. ClojureScript: returns a `js/Promise` of that value.
 
   ## Options
 
@@ -741,10 +775,10 @@
       (refresh-if-needed client session {:force true})"
   ([client session] (refresh-if-needed client session {}))
   ([client session opts]
-   (or (client/ensure-client client)
+   (or (some-> (client/ensure-client client) resolve-when)
        (if (or (:force opts) (needs-refresh? session opts))
          (refresh-to-session client session)
-         session))))
+         (resolve-when session)))))
 
 (defn ensure-valid-session
   "Validates `session` and refreshes it when needed, in one operation.
@@ -765,15 +799,16 @@
           (make-api-call session)))"
   ([client session] (ensure-valid-session client session {}))
   ([client session opts]
-   (or (client/ensure-client client)
+   (or (some-> (client/ensure-client client) resolve-when)
        (cond
          (not (and (session-get session :access-token)
                    (session-get session :refresh-token)))
-         (error/anomaly :cognitect.anomalies/incorrect
-                        {:cognitect.anomalies/message "Invalid session: missing tokens"
-                         :supabase/service :auth})
+         (resolve-when
+          (error/anomaly :cognitect.anomalies/incorrect
+                         {:cognitect.anomalies/message "Invalid session: missing tokens"
+                          :supabase/service :auth}))
 
          (needs-refresh? session opts)
          (refresh-to-session client session)
 
-         :else session))))
+         :else (resolve-when session)))))

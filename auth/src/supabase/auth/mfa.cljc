@@ -26,7 +26,9 @@
       (mfa/verify-recovery-code client token {:code \"K4M9-X7QP-2AB8-HT3Z\"})
 
   Each function returns `{:status :body :headers}` on success or an anomaly
-  map on failure. See https://supabase.com/docs/guides/auth/auth-mfa"
+  map on failure. On ClojureScript every function returns a `js/Promise` of
+  that value instead (fetch is async-only).
+  See https://supabase.com/docs/guides/auth/auth-mfa"
   (:require [clojure.string :as str]
             [supabase.auth :as auth]
             [supabase.auth.errors :as errors]
@@ -47,6 +49,20 @@
 
 (defn- with-auth [req access-token]
   (http/with-headers req {"authorization" (str "Bearer " access-token)}))
+
+(defn- exec
+  "Executes the request: synchronously on the JVM, returning a `js/Promise`
+  on ClojureScript."
+  [req]
+  #?(:clj  (http/execute req)
+     :cljs (http/execute-async req)))
+
+(defn- resolve-when
+  "Wraps a plain value so every public fn has one return type per
+  platform: the value itself on the JVM, a resolved `js/Promise` on
+  ClojureScript."
+  [v]
+  #?(:clj v :cljs (js/Promise.resolve v)))
 
 (declare unenroll-stale-unverified-factor)
 
@@ -76,22 +92,24 @@
 
       (enroll client \"<access-token>\" {:factor-type \"totp\"})"
   [client access-token params]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/MFAEnroll params)
-      (let [resp (-> (http/request client)
-                     (http/with-method :post)
-                     (http/with-service-url :auth-url factors-uri)
-                     (with-auth access-token)
-                     (http/with-body (snake-keys params))
-                     (errors/with-auth-errors)
-                     (http/execute))]
-        (if (and (error/anomaly? resp)
-                 (= "webauthn" (:factor-type params))
-                 (:friendly-name params))
-          (do (unenroll-stale-unverified-factor client access-token
-                                                (:friendly-name params))
-              resp)
-          resp))))
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/MFAEnroll params) resolve-when)
+      (let [req (-> (http/request client)
+                    (http/with-method :post)
+                    (http/with-service-url :auth-url factors-uri)
+                    (with-auth access-token)
+                    (http/with-body (snake-keys params))
+                    (errors/with-auth-errors))
+            handle (fn [resp]
+                     (if (and (error/anomaly? resp)
+                              (= "webauthn" (:factor-type params))
+                              (:friendly-name params))
+                       (do (unenroll-stale-unverified-factor client access-token
+                                                             (:friendly-name params))
+                           resp)
+                       resp))]
+        #?(:clj  (handle (exec req))
+           :cljs (.then (exec req) handle)))))
 
 (defn challenge
   "Creates a challenge for the factor `factor-id`. The returned body carries
@@ -109,15 +127,15 @@
       (challenge client \"<access-token>\" \"<factor-id>\" {:channel \"sms\"})"
   ([client access-token factor-id] (challenge client access-token factor-id {}))
   ([client access-token factor-id params]
-   (or (client/ensure-client client)
-       (specs/ensure-valid specs/MFAChallenge params)
+   (or (some-> (client/ensure-client client) resolve-when)
+       (some-> (specs/ensure-valid specs/MFAChallenge params) resolve-when)
        (-> (http/request client)
            (http/with-method :post)
            (http/with-service-url :auth-url (factor-path factor-id "challenge"))
            (with-auth access-token)
            (http/with-body (snake-keys params))
            (errors/with-auth-errors)
-           (http/execute)))))
+           exec))))
 
 (defn verify
   "Verifies the challenge `challenge-id` for factor `factor-id`. On success
@@ -133,15 +151,15 @@
       (verify client \"<access-token>\" \"<factor-id>\" \"<challenge-id>\"
               {:code \"123456\"})"
   [client access-token factor-id challenge-id params]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/MFAVerify params)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/MFAVerify params) resolve-when)
       (-> (http/request client)
           (http/with-method :post)
           (http/with-service-url :auth-url (factor-path factor-id "verify"))
           (with-auth access-token)
           (http/with-body (assoc (snake-keys params) :challenge_id challenge-id))
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn unenroll
   "Removes the factor `factor-id` from the user's account. Permanent.
@@ -150,13 +168,13 @@
 
       (unenroll client \"<access-token>\" \"<factor-id>\")"
   [client access-token factor-id]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (-> (http/request client)
           (http/with-method :delete)
           (http/with-service-url :auth-url (factor-path factor-id))
           (with-auth access-token)
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn challenge-and-verify
   "Challenge + verify in one call, for TOTP factors where the code is
@@ -166,10 +184,29 @@
 
       (challenge-and-verify client \"<access-token>\" \"<factor-id>\" \"123456\")"
   [client access-token factor-id code]
-  (let [resp (challenge client access-token factor-id)]
-    (if (error/anomaly? resp)
-      resp
-      (verify client access-token factor-id (get-in resp [:body :id]) {:code code}))))
+  (letfn [(step [resp]
+            (if (error/anomaly? resp)
+              resp
+              (verify client access-token factor-id
+                      (get-in resp [:body :id]) {:code code})))]
+    #?(:clj  (step (challenge client access-token factor-id))
+       :cljs (.then (challenge client access-token factor-id) step))))
+
+(defn- group-factors
+  "Groups a get-user response's `:factors` list into `:all` + per-type
+  verified buckets."
+  [resp]
+  (if (error/anomaly? resp)
+    resp
+    (let [factors (vec (get-in resp [:body :factors]))
+          verified-of (fn [factor-type]
+                        (filterv #(and (= factor-type (:factor_type %))
+                                       (= "verified" (:status %)))
+                                 factors))]
+      (assoc resp :body {:all factors
+                         :totp (verified-of "totp")
+                         :phone (verified-of "phone")
+                         :webauthn (verified-of "webauthn")}))))
 
 (defn list-factors
   "Lists the user's MFA factors, grouped for convenience.
@@ -183,18 +220,8 @@
 
       (list-factors client \"<access-token>\")"
   [client access-token]
-  (let [resp (auth/get-user client access-token)]
-    (if (error/anomaly? resp)
-      resp
-      (let [factors (vec (get-in resp [:body :factors]))
-            verified-of (fn [factor-type]
-                          (filterv #(and (= factor-type (:factor_type %))
-                                         (= "verified" (:status %)))
-                                   factors))]
-        (assoc resp :body {:all factors
-                           :totp (verified-of "totp")
-                           :phone (verified-of "phone")
-                           :webauthn (verified-of "webauthn")})))))
+  #?(:clj  (group-factors (auth/get-user client access-token))
+     :cljs (.then (auth/get-user client access-token) group-factors)))
 
 (defn get-authenticator-assurance-level
   "Returns the user's current and next possible authenticator assurance
@@ -215,19 +242,21 @@
 
       (get-authenticator-assurance-level client \"<access-token>\")"
   [client access-token]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (let [decoded (jwt/decode access-token)]
         (if (error/anomaly? decoded)
-          decoded
-          (let [resp (list-factors client access-token)]
-            (if (error/anomaly? resp)
-              resp
-              (let [{:keys [aal amr]} (:payload decoded)
-                    verified? (some #(= "verified" (:status %))
-                                    (get-in resp [:body :all]))]
-                {:current-level aal
-                 :next-level (if verified? "aal2" aal)
-                 :current-authentication-methods (vec (or amr []))})))))))
+          (resolve-when decoded)
+          (letfn [(aal-from [resp]
+                    (if (error/anomaly? resp)
+                      resp
+                      (let [{:keys [aal amr]} (:payload decoded)
+                            verified? (some #(= "verified" (:status %))
+                                            (get-in resp [:body :all]))]
+                        {:current-level aal
+                         :next-level (if verified? "aal2" aal)
+                         :current-authentication-methods (vec (or amr []))})))]
+            #?(:clj  (aal-from (list-factors client access-token))
+               :cljs (.then (list-factors client access-token) aal-from)))))))
 
 (defn- unenroll-stale-unverified-factor
   "Best-effort cleanup after a failed WebAuthn registration: unenrolls the
@@ -236,15 +265,17 @@
   credential in active use and is never removed. Cleanup failures are
   swallowed so the caller still sees the original enroll anomaly."
   [client access-token friendly-name]
-  (let [resp (list-factors client access-token)]
-    (when-not (error/anomaly? resp)
-      (when-let [factor (some #(when (and (= "webauthn" (:factor_type %))
-                                          (= friendly-name (:friendly_name %))
-                                          (= "unverified" (:status %)))
-                                 %)
-                              (get-in resp [:body :all]))]
-        (unenroll client access-token (:id factor)))))
-  nil)
+  (letfn [(cleanup [resp]
+            (when-not (error/anomaly? resp)
+              (when-let [factor (some #(when (and (= "webauthn" (:factor_type %))
+                                                  (= friendly-name (:friendly_name %))
+                                                  (= "unverified" (:status %)))
+                                         %)
+                                      (get-in resp [:body :all]))]
+                (unenroll client access-token (:id factor))))
+            nil)]
+    #?(:clj  (cleanup (list-factors client access-token))
+       :cljs (.then (list-factors client access-token) cleanup))))
 
 ;; ---------------------------------------------------------------------------
 ;; Recovery codes (experimental)
@@ -265,12 +296,12 @@
 
       (get-recovery-codes-status client \"<access-token>\")"
   [client access-token]
-  (or (client/ensure-client client)
+  (or (some-> (client/ensure-client client) resolve-when)
       (-> (http/request client)
           (http/with-service-url :auth-url recovery-codes-uri)
           (with-auth access-token)
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
 
 (defn generate-recovery-codes
   "Generates the user's set of recovery codes. The plaintext `:codes` in the
@@ -292,15 +323,15 @@
       (generate-recovery-codes client \"<access-token>\" {:friendly-name \"backup\"})"
   ([client access-token] (generate-recovery-codes client access-token {}))
   ([client access-token params]
-   (or (client/ensure-client client)
-       (specs/ensure-valid specs/MFARecoveryCodesGenerate params)
+   (or (some-> (client/ensure-client client) resolve-when)
+       (some-> (specs/ensure-valid specs/MFARecoveryCodesGenerate params) resolve-when)
        (-> (http/request client)
            (http/with-method :post)
            (http/with-service-url :auth-url recovery-codes-uri)
            (with-auth access-token)
            (http/with-body (when (:friendly-name params) (snake-keys params)))
            (errors/with-auth-errors)
-           (http/execute)))))
+           exec))))
 
 (defn verify-recovery-code
   "Verifies one of the user's recovery codes and upgrades the session to
@@ -320,12 +351,12 @@
 
       (verify-recovery-code client \"<access-token>\" {:code \"K4M9-X7QP-2AB8-HT3Z\"})"
   [client access-token params]
-  (or (client/ensure-client client)
-      (specs/ensure-valid specs/MFARecoveryCodeVerify params)
+  (or (some-> (client/ensure-client client) resolve-when)
+      (some-> (specs/ensure-valid specs/MFARecoveryCodeVerify params) resolve-when)
       (-> (http/request client)
           (http/with-method :post)
           (http/with-service-url :auth-url (str recovery-codes-uri "/verify"))
           (with-auth access-token)
           (http/with-body (snake-keys params))
           (errors/with-auth-errors)
-          (http/execute))))
+          exec)))
