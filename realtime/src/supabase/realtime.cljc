@@ -269,16 +269,18 @@
 
 (defn- http-broadcast!
   "POSTs a broadcast to the Realtime REST endpoint. Returns nil on success
-  or the anomaly from `supabase.core.http/execute`."
+  or the anomaly from the request. ClojureScript: returns a `js/Promise`
+  of that value."
   [client topic event payload]
-  (let [resp (-> (http/request client)
-                 (http/with-service-url :realtime-url "/api/broadcast")
-                 (http/with-method :post)
-                 (http/with-body {:messages [{:topic topic
-                                              :event event
-                                              :payload payload}]})
-                 (http/execute))]
-    (when (error/anomaly? resp) resp)))
+  (let [req (-> (http/request client)
+                (http/with-service-url :realtime-url "/api/broadcast")
+                (http/with-method :post)
+                (http/with-body {:messages [{:topic topic
+                                             :event event
+                                             :payload payload}]}))
+        ok-or-anomaly (fn [resp] (when (error/anomaly? resp) resp))]
+    #?(:clj  (ok-or-anomaly (http/execute req))
+       :cljs (.then (http/execute-async req) ok-or-anomaly))))
 
 (defn broadcast
   "Sends a broadcast message on `ch`. Buffered until the channel joins.
@@ -287,14 +289,17 @@
   When the connection was opened with `:http-fallback? true` and the socket
   is not `:open`, the broadcast is sent over HTTP POST to `/api/broadcast`
   instead of buffering — mirrors realtime-ex. In that case returns `ch` on
-  HTTP success, or the anomaly from the failed request. Broadcasts sent via
-  `broadcast-with-ack` never fall back; they buffer like today."
+  HTTP success, or the anomaly from the failed request (ClojureScript: a
+  `js/Promise` of that value). Broadcasts sent via `broadcast-with-ack`
+  never fall back; they buffer like today."
   [ch event payload]
   (let [c (channel-conn ch)
         topic (:topic ch)]
     (if (and (:http-fallback? c)
              (not= :open (:status @(:state c))))
-      (or (http-broadcast! (:client c) topic event payload) ch)
+      #?(:clj  (or (http-broadcast! (:client c) topic event payload) ch)
+         :cljs (.then (http-broadcast! (:client c) topic event payload)
+                      (fn [anomaly] (or anomaly ch))))
       (let [cs (conn/channel-state c topic)
             ref (new-ref ch)
             frame (proto/broadcast-frame ref (:join-ref cs) topic event payload)]
@@ -306,6 +311,17 @@
 
 (defn- new-ack-ref []
   (str "ack:" (random-uuid)))
+
+(defn- new-ack-slot
+  "Creates the pending-ack slot stored per ack-ref: a `promise` on the JVM,
+  a `{:promise js/Promise :resolve fn}` map on ClojureScript. The Promise
+  executor runs synchronously, so `:resolve` is set before the map is
+  returned."
+  []
+  #?(:clj  (promise)
+     :cljs (let [holder (atom nil)
+                 p (js/Promise. (fn [resolve _] (reset! holder resolve)))]
+             {:promise p :resolve @holder})))
 
 (defn broadcast-with-ack
   "Sends a broadcast and returns the ack-ref (string) identifying it. The
@@ -321,36 +337,56 @@
         topic (:topic ch)
         cs (conn/channel-state c topic)
         ack-ref (new-ack-ref)
-        p (promise)
+        slot (new-ack-slot)
         frame (proto/broadcast-frame ack-ref (:join-ref cs) topic event payload)]
-    (conn/update-channel! c topic assoc-in [:pending-acks ack-ref] p)
+    (conn/update-channel! c topic assoc-in [:pending-acks ack-ref] slot)
     (push-or-buffer! ch frame)
     ack-ref))
 
+(defn- ack-timeout-anomaly [ack-ref]
+  (error/anomaly :cognitect.anomalies/busy
+                 {:cognitect.anomalies/message "Broadcast ack timed out"
+                  :supabase/service :realtime
+                  :supabase/code :ack-timeout
+                  :realtime/ack-ref ack-ref}))
+
+(defn- ack-not-found-anomaly [ack-ref]
+  (error/anomaly :cognitect.anomalies/not-found
+                 {:cognitect.anomalies/message "Unknown ack-ref"
+                  :supabase/service :realtime
+                  :supabase/code :ack-not-found
+                  :realtime/ack-ref ack-ref}))
+
 (defn wait-for-ack
-  "Blocks up to `timeout-ms` (default 5000) for the server ack of `ack-ref`
-  from `broadcast-with-ack`. Returns `:acknowledged`, or an anomaly:
-  `:ack-timeout` when the wait expires, `:ack-not-found` for an unknown ref."
+  "Waits for the server ack of `ack-ref` from `broadcast-with-ack`, up to
+  `timeout-ms` (default 5000). Returns `:acknowledged`, or an anomaly:
+  `:ack-timeout` when the wait expires, `:ack-not-found` for an unknown ref.
+
+  Blocks the calling thread on the JVM. On ClojureScript returns a
+  `js/Promise` resolving to the same values."
   ([ch ack-ref] (wait-for-ack ch ack-ref {}))
   ([ch ack-ref {:keys [timeout-ms] :or {timeout-ms 5000}}]
    (let [c (channel-conn ch)
          topic (:topic ch)
-         p (get-in @(:state c) [:channels topic :pending-acks ack-ref])]
-     (if-not p
-       (error/anomaly :cognitect.anomalies/not-found
-                      {:cognitect.anomalies/message "Unknown ack-ref"
-                       :supabase/service :realtime
-                       :supabase/code :ack-not-found
-                       :realtime/ack-ref ack-ref})
-       (let [v (deref p timeout-ms ::timeout)]
-         (conn/update-channel! c topic update :pending-acks dissoc ack-ref)
-         (if (= ::timeout v)
-           (error/anomaly :cognitect.anomalies/busy
-                          {:cognitect.anomalies/message "Broadcast ack timed out"
-                           :supabase/service :realtime
-                           :supabase/code :ack-timeout
-                           :realtime/ack-ref ack-ref})
-           :acknowledged))))))
+         slot (get-in @(:state c) [:channels topic :pending-acks ack-ref])]
+     (if-not slot
+       #?(:clj (ack-not-found-anomaly ack-ref)
+          :cljs (js/Promise.resolve (ack-not-found-anomaly ack-ref)))
+       #?(:clj  (let [v (deref slot timeout-ms ::timeout)]
+                  (conn/update-channel! c topic update :pending-acks dissoc ack-ref)
+                  (if (= ::timeout v)
+                    (ack-timeout-anomaly ack-ref)
+                    :acknowledged))
+          :cljs (let [timeout-p (js/Promise.
+                                 (fn [resolve _]
+                                   (js/setTimeout (fn [] (resolve ::timeout)) timeout-ms)))]
+                  (-> (js/Promise.race #js [(:promise slot) timeout-p])
+                      (.then (fn [v]
+                               (conn/update-channel! c topic update :pending-acks
+                                                     dissoc ack-ref)
+                               (if (= ::timeout v)
+                                 (ack-timeout-anomaly ack-ref)
+                                 :acknowledged))))))))))
 
 (defn track
   "Sends a presence `track` message with `state`. Returns `ch`."

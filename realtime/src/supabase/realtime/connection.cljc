@@ -1,17 +1,23 @@
 (ns supabase.realtime.connection
   "WebSocket connection lifecycle for Supabase Realtime.
 
-  Holds a single hato-backed WebSocket per `connect` call. State lives in
-  one atom; mutation goes through `swap!`; user callbacks run outside the
-  swap to avoid running user code under contention.
+  Holds a single WebSocket per `connect` call — hato-backed on the JVM,
+  `js/WebSocket` on ClojureScript. State lives in one atom; mutation goes
+  through `swap!`; user callbacks run outside the swap to avoid running
+  user code under contention.
 
   The `Transport` protocol is the test seam — tests substitute a recording
-  transport (see `realtime_test`) without redefining hato internals."
+  transport (see `realtime_test`) without redefining the platform socket.
+
+  Platform notes: browsers cannot set headers on the WebSocket upgrade, so
+  on ClojureScript the `Authorization` header is skipped (the `apikey`
+  query param and the `access_token` join payload carry auth instead), and
+  timers use `js/setInterval`/`js/setTimeout` in place of JVM executors."
   (:require [clojure.string :as str]
-            [hato.websocket :as ws]
+            #?@(:clj [[hato.websocket :as ws]])
             [supabase.core.error :as error]
             [supabase.realtime.protocol :as proto])
-  (:import (java.util.concurrent Executors ScheduledExecutorService TimeUnit)))
+  #?(:clj (:import (java.util.concurrent Executors ScheduledExecutorService TimeUnit))))
 
 ;; ---------------------------------------------------------------------------
 ;; Transport protocol
@@ -56,7 +62,7 @@
   (when access-token-fn
     (try (let [v (access-token-fn)]
            (when (string? v) v))
-         (catch Throwable _ nil))))
+         (catch #?(:clj Throwable :cljs :default) _ nil))))
 
 (defn resolve-token
   "Resolves the bearer token for `conn`: the `:access-token-fn` result when
@@ -85,48 +91,74 @@
    "X-Client-Info" "supabase-realtime-clj/0.1.0"})
 
 ;; ---------------------------------------------------------------------------
-;; hato Transport impl
+;; Platform Transport impls
 ;; ---------------------------------------------------------------------------
 
-(defn- buffering-on-message
-  "Wraps `dispatch` with logic to reassemble partial text frames."
-  [dispatch]
-  (let [buf (StringBuilder.)]
-    (fn [_ws data last?]
-      (.append buf (str data))
-      (when last?
-        (let [text (.toString buf)]
-          (.setLength buf 0)
-          (try (dispatch text)
-               (catch Throwable t
-                 (dispatch ::error t))))))))
+#?(:clj
+   (do
+     (defn- buffering-on-message
+       "Wraps `dispatch` with logic to reassemble partial text frames."
+       [dispatch]
+       (let [buf (StringBuilder.)]
+         (fn [_ws data last?]
+           (.append buf (str data))
+           (when last?
+             (let [text (.toString buf)]
+               (.setLength buf 0)
+               (try (dispatch text)
+                    (catch #?(:clj Throwable :cljs :default) t
+                      (dispatch ::error t))))))))
 
-(defn ws-transport
-  "Opens a hato WebSocket to `url` with the given upgrade `headers` and
-  `handlers` map. Returns a reified `Transport`.
+     (defn ws-transport
+       "Opens a hato WebSocket to `url` with the given upgrade `headers` and
+       `handlers` map. Returns a reified `Transport`. JVM only.
 
-  `handlers` keys:
-    :on-open    (fn [])
-    :on-text    (fn [text])
-    :on-close   (fn [code reason])
-    :on-error   (fn [throwable])
+       `handlers` keys:
+         :on-open    (fn [])
+         :on-text    (fn [text])
+         :on-close   (fn [code reason])
+         :on-error   (fn [throwable])
 
-  Partial text frames are buffered until `last?` is true."
-  [url headers handlers]
-  (let [{:keys [on-open on-text on-close on-error]} handlers
-        socket @(ws/websocket url
-                              {:headers headers
-                               :on-open    (fn [_ws] (when on-open (on-open)))
-                               :on-message (buffering-on-message
-                                            (fn [text]
-                                              (when on-text (on-text text))))
-                               :on-close   (fn [_ws code reason]
-                                             (when on-close (on-close code reason)))
-                               :on-error   (fn [_ws err]
-                                             (when on-error (on-error err)))})]
-    (reify Transport
-      (send-text [_ text] (ws/send! socket text) true)
-      (close! [_ code reason] (ws/close! socket (or code 1000) (or reason ""))))))
+       Partial text frames are buffered until `last?` is true."
+       [url headers handlers]
+       (let [{:keys [on-open on-text on-close on-error]} handlers
+             socket @(ws/websocket url
+                                   {:headers headers
+                                    :on-open    (fn [_ws] (when on-open (on-open)))
+                                    :on-message (buffering-on-message
+                                                 (fn [text]
+                                                   (when on-text (on-text text))))
+                                    :on-close   (fn [_ws code reason]
+                                                  (when on-close (on-close code reason)))
+                                    :on-error   (fn [_ws err]
+                                                  (when on-error (on-error err)))})]
+         (reify Transport
+           (send-text [_ text] (ws/send! socket text) true)
+           (close! [_ code reason] (ws/close! socket (or code 1000) (or reason ""))))))))
+
+#?(:cljs
+   (defn ws-transport
+     "Opens a `js/WebSocket` to `url` with the given `handlers` map and
+     returns a reified `Transport`. ClojureScript only.
+
+     `headers` is ignored: the browser WebSocket API cannot set upgrade
+     headers. Auth still reaches the server via the `apikey` query param
+     and the `access_token` join payload.
+
+     Works in browsers and in Node.js >= 22 (global `WebSocket`). Messages
+     arrive as whole text frames, so no reassembly is needed."
+     [url _headers handlers]
+     (let [{:keys [on-open on-text on-close on-error]} handlers
+           socket (js/WebSocket. url)]
+       (set! (.-onopen socket) (fn [_] (when on-open (on-open))))
+       (set! (.-onmessage socket) (fn [e] (when on-text (on-text (.-data e)))))
+       (set! (.-onclose socket) (fn [e]
+                                  (when on-close (on-close (.-code e) (.-reason e)))))
+       (set! (.-onerror socket) (fn [e]
+                                  (when on-error (on-error (js/Error. "WebSocket error" #js {:cause e})))))
+       (reify Transport
+         (send-text [_ text] (.send socket text) true)
+         (close! [_ code reason] (.close socket (or code 1000) (or reason "")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; State helpers
@@ -171,7 +203,7 @@
   (let [[old _] (swap-vals! (:state conn) assoc :send-buf [])]
     (doseq [text (:send-buf old)]
       (try (send-text (transport conn) text)
-           (catch Throwable t
+           (catch #?(:clj Throwable :cljs :default) t
              (when-let [f (:on-error conn)] (f (error/from-exception t :realtime))))))))
 
 ;; ---------------------------------------------------------------------------
@@ -224,7 +256,7 @@
 
 (defn- safe-call [f & args]
   (try (apply f args)
-       (catch Throwable _ nil)))
+       (catch #?(:clj Throwable :cljs :default) _ nil)))
 
 (defn- handle-join-reply
   "Server ack of a `phx_join`: flip channel to :joined, capture
@@ -255,7 +287,7 @@
             pushes (get-in old [:channels topic :push-buf])]
         (doseq [text pushes]
           (try (send-text (transport conn) text)
-               (catch Throwable t
+               (catch #?(:clj Throwable :cljs :default) t
                  (when-let [f (:on-error conn)]
                    (f (error/from-exception t :realtime)))))))
       cs)))
@@ -273,16 +305,24 @@
                          :realtime/topic topic
                          :realtime/payload payload})))))
 
+(defn- deliver-ack!
+  "Delivers `:acknowledged` to a pending-ack slot: a JVM `promise`, or a
+  `{:promise :resolve}` map on ClojureScript (see
+  `supabase.realtime/broadcast-with-ack`)."
+  [slot v]
+  #?(:clj  (deliver slot v)
+     :cljs ((:resolve slot) v)))
+
 (defn- handle-ack-reply
   "Server ack for a `broadcast-with-ack` frame: the reply ref carries the
-  `ack:`-prefixed ref we sent. Delivers the pending promise on status ok —
+  `ack:`-prefixed ref we sent. Delivers the pending slot on status ok —
   the entry stays until `wait-for-ack` collects it (ack may land first)."
   [conn frame]
   (when (= "ok" (get-in frame [:payload :status]))
     (let [topic (:topic frame)
           ref (:ref frame)
-          p (get-in @(:state conn) [:channels topic :pending-acks ref])]
-      (when p (deliver p :acknowledged))))
+          slot (get-in @(:state conn) [:channels topic :pending-acks ref])]
+      (when slot (deliver-ack! slot :acknowledged))))
   nil)
 
 (defn- handle-phx-reply [conn frame]
@@ -455,24 +495,37 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- start-heartbeat!
-  ^ScheduledExecutorService [conn interval-ms]
-  (let [exec (Executors/newSingleThreadScheduledExecutor
-              (reify java.util.concurrent.ThreadFactory
-                (newThread [_ r]
-                  (doto (Thread. r "supabase-realtime-heartbeat")
-                    (.setDaemon true)))))]
-    (.scheduleAtFixedRate exec
-                          (fn []
-                            (try
-                              (when (open? (:state conn))
-                                (let [ref (new-ref (:state conn))
-                                      frame (proto/heartbeat-frame ref)]
-                                  (send-text (transport conn) (proto/encode frame))))
-                              (catch Throwable t
-                                (when-let [f (:on-error conn)]
-                                  (f (error/from-exception t :realtime))))))
-                          interval-ms interval-ms TimeUnit/MILLISECONDS)
-    exec))
+  "Starts the heartbeat timer. Returns a platform handle: a
+  `ScheduledExecutorService` on the JVM, a `js/setInterval` id on
+  ClojureScript. [[stop-timer!]] shuts either down."
+  [conn interval-ms]
+  (let [tick (fn []
+               (try
+                 (when (open? (:state conn))
+                   (let [ref (new-ref (:state conn))
+                         frame (proto/heartbeat-frame ref)]
+                     (send-text (transport conn) (proto/encode frame))))
+                 (catch #?(:clj Throwable :cljs :default) t
+                   (when-let [f (:on-error conn)]
+                     (f (error/from-exception t :realtime))))))]
+    #?(:clj  (let [exec (Executors/newSingleThreadScheduledExecutor
+                         (reify java.util.concurrent.ThreadFactory
+                           (newThread [_ r]
+                             (doto (Thread. r "supabase-realtime-heartbeat")
+                               (.setDaemon true)))))]
+               (.scheduleAtFixedRate exec tick interval-ms interval-ms TimeUnit/MILLISECONDS)
+               exec)
+       :cljs (js/setInterval tick interval-ms))))
+
+(defn- stop-timer!
+  "Stops a timer handle returned by [[start-heartbeat!]] or a reconnect
+  timeout id (ClojureScript)."
+  [handle]
+  #?(:clj  (when-let [^ScheduledExecutorService exec handle]
+             (.shutdownNow exec))
+     :cljs (when handle
+             (js/clearInterval handle)
+             (js/clearTimeout handle))))
 
 ;; ---------------------------------------------------------------------------
 ;; Reconnect
@@ -484,7 +537,8 @@
   "Default backoff: `min(10s, 2s^tries)` — 2s, 4s, 8s, then 10s cap.
   Matches realtime-ex."
   [tries]
-  (min max-backoff-ms (long (Math/pow 2000 (max 1 tries)))))
+  (min max-backoff-ms (long #?(:clj (Math/pow 2000 (max 1 tries))
+                               :cljs (js/Math.pow 2000 (max 1 tries))))))
 
 (defn- mark-channels-disconnected!
   "Flips every :joined/:joining channel back to :idle, keeping `:join-ref`
@@ -525,7 +579,7 @@
     (try
       (let [t ((:transport-factory conn) (:url conn) (upgrade-headers conn) (:handlers conn))]
         (swap! (:state conn) assoc :transport t :status :connecting))
-      (catch Throwable t
+      (catch #?(:clj Throwable :cljs :default) t
         (when-let [f (:on-error conn)]
           (f (error/from-exception t :realtime)))
         (schedule-reconnect! conn)))))
@@ -551,9 +605,11 @@
       :else
       (let [delay ((:reconnect-after-ms conn) (inc reconnect-attempts))]
         (swap! (:state conn) assoc :status :reconnecting)
-        (.schedule ^ScheduledExecutorService (:reconnect-exec conn)
-                   ^Runnable (fn [] (attempt-reconnect! conn))
-                   delay TimeUnit/MILLISECONDS)
+        #?(:clj  (.schedule ^ScheduledExecutorService (:reconnect-exec conn)
+                            ^Runnable (fn [] (attempt-reconnect! conn))
+                            delay TimeUnit/MILLISECONDS)
+           :cljs (let [id (js/setTimeout (fn [] (attempt-reconnect! conn)) delay)]
+                   (swap! (:state conn) assoc :reconnect-timer id)))
         nil))))
 
 ;; ---------------------------------------------------------------------------
@@ -564,7 +620,7 @@
   (fn [text]
     (when-let [conn @conn-promise]
       (let [frame (try (proto/parse-frame text)
-                       (catch Throwable t
+                       (catch #?(:clj Throwable :cljs :default) t
                          (when-let [f (:on-error conn)]
                            (f (error/from-exception t :realtime)))
                          nil))]
@@ -641,11 +697,15 @@
                                  (when-let [conn @conn-promise]
                                    (swap! (:state conn) assoc :status :closed))))
                    :on-error (on-error-handler conn-promise)}
-         reconnect-exec (Executors/newSingleThreadScheduledExecutor
-                         (reify java.util.concurrent.ThreadFactory
-                           (newThread [_ r]
-                             (doto (Thread. r "supabase-realtime-reconnect")
-                               (.setDaemon true)))))]
+         reconnect-exec #?(:clj (Executors/newSingleThreadScheduledExecutor
+                                 (reify java.util.concurrent.ThreadFactory
+                                   (newThread [_ r]
+                                     (doto (Thread. r "supabase-realtime-reconnect")
+                                       (.setDaemon true)))))
+                           ;; Reconnects run on js/setTimeout; the marker keeps
+                           ;; the connection map's shape identical across
+                           ;; platforms (and `valid-conn?` passing).
+                           :cljs ::js-timers)]
      (try
        (let [conn {:client    client
                    :state     state
@@ -664,8 +724,8 @@
              conn (assoc conn :heartbeat heartbeat)]
          (reset! conn-promise conn)
          conn)
-       (catch Throwable t
-         (.shutdownNow reconnect-exec)
+       (catch #?(:clj Throwable :cljs :default) t
+         (stop-timer! reconnect-exec)
          (error/from-exception t :realtime))))))
 
 (defn disconnect
@@ -675,11 +735,10 @@
   [conn]
   (when conn
     (swap! (:state conn) assoc :closing? true)
-    (when-let [^ScheduledExecutorService exec (:heartbeat conn)]
-      (.shutdownNow exec))
-    (when-let [^ScheduledExecutorService exec (:reconnect-exec conn)]
-      (.shutdownNow exec))
+    (stop-timer! (:heartbeat conn))
+    #?(:clj (stop-timer! (:reconnect-exec conn))
+       :cljs (stop-timer! (:reconnect-timer @(:state conn))))
     (try (close! (transport conn) 1000 "client closing")
-         (catch Throwable _ nil))
+         (catch #?(:clj Throwable :cljs :default) _ nil))
     (swap! (:state conn) assoc :status :closed)
     conn))
