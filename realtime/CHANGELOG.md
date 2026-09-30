@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/supabase-community/supabase-clj/compare/realtime-v1.4.0...realtime-v1.5.0) (2026-09-30)
+
+
+### Features
+
+* **realtime:** ClojureScript WebSocket backend via CLJC split ([#57](https://github.com/supabase-community/supabase-clj/issues/57)) ([d156598](https://github.com/supabase-community/supabase-clj/commit/d156598741fcbb04e5e9fb0b5db0df37a474f0c2))
+
 ## [1.4.0](https://github.com/supabase-community/supabase-clj/compare/realtime-v1.3.0...realtime-v1.4.0) (2026-09-22)
 
 

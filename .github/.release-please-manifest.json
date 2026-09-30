@@ -2,7 +2,7 @@
   "core": "0.8.0",
   "auth": "0.7.0",
   "storage": "0.6.0",
-  "realtime": "1.4.0",
+  "realtime": "1.5.0",
   "postgrest": "1.5.0",
   "functions": "0.2.0"
 }
