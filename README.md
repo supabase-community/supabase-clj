@@ -22,6 +22,9 @@ Individual product client documentation:
 - [Postgrest](postgrest/)
 - [Functions](functions/)
 
+Task-oriented recipes (ClojureScript setup, MFA recovery codes, bucket
+lifecycle rules, object versioning): [Cookbook](COOKBOOK.md)
+
 ### Clients
 
 A Supabase client is a plain immutable Clojure map holding general information about your Supabase project. It can be passed to any of the service modules (auth, storage, postgrest, etc.) to interact with the corresponding API.
