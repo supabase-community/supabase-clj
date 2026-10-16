@@ -71,9 +71,14 @@
 (defn channel
   "Returns a channel value bound to `conn` + `topic`. No network I/O.
 
-  `opts` may include `:config` (broadcast/presence/private). The channel
-  is registered in connection state so subsequent `on` / `subscribe` calls
-  can find it. Returns the channel map or an anomaly."
+  `opts` may include `:config` (broadcast/presence/private). Under
+  `:broadcast`, `:replay` `{:since epoch-ms :limit int}` asks the server
+  to replay broadcast messages (see `specs/ReplayOption`): it is only
+  valid on a private channel (`:config {:private true}`) — on a public
+  channel `channel` returns an anomaly instead, mirroring realtime-js.
+
+  The channel is registered in connection state so subsequent `on` /
+  `subscribe` calls can find it. Returns the channel map or an anomaly."
   ([conn topic] (channel conn topic {}))
   ([conn topic opts]
    (cond
@@ -89,8 +94,23 @@
                               :presence  {:key ""}
                               :private   false}
                              (:config opts))]
-           (conn/upsert-channel! conn topic' config)
-           {:conn conn :topic topic'})))))
+           (cond
+             ;; realtime-js throws on replay + public channel at channel
+             ;; construction; this client returns the same failure as an
+             ;; anomaly.
+             (and (get-in config [:broadcast :replay])
+                  (clojure.core/not (:private config)))
+             (error/anomaly :cognitect.anomalies/incorrect
+                            {:cognitect.anomalies/message
+                             (str "tried to use replay on public channel '"
+                                  topic' "'. It must be a private channel.")
+                             :supabase/service :realtime
+                             :supabase/code :replay-on-public-channel
+                             :realtime/topic topic'})
+
+             :else
+             (do (conn/upsert-channel! conn topic' config)
+                 {:conn conn :topic topic'})))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Bindings
@@ -141,6 +161,12 @@
                                   :select [\"id\" \"email\"] (optional)}`
     :broadcast         — filter `{:event \"typing\"}` (use `\"*\"` for all)
     :presence          — filter `{:event :sync | :join | :leave}`
+
+  Delivered broadcast callbacks receive the message payload; when the
+  server replays a message (channel configured with
+  `:config {:broadcast {:replay ...}}` and `:private true`), the payload
+  carries the server's `:meta` map (`{:replayed true ...}`) alongside the
+  user data, mirroring realtime-js `meta.replayed`.
 
   The postgres_changes `:filter` also accepts a builder from
   `supabase.realtime.filters` — it is serialized to its wire string at

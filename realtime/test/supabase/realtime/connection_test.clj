@@ -190,6 +190,26 @@
       (is (= [{:n 1} {:n 2}] @hits))
       (finally (conn/disconnect conn)))))
 
+(deftest broadcast-preserves-replay-meta
+  (let [[conn rt] (connect-test)
+        captured (atom nil)]
+    (try
+      ((:open rt))
+      (conn/upsert-channel! conn "realtime:r" {})
+      (conn/add-binding! conn "realtime:r"
+                         {:type :broadcast
+                          :filter {:event "typing"}
+                          :callback #(reset! captured %)})
+      ((:feed rt) (proto/encode
+                   {:topic "realtime:r"
+                    :event "broadcast"
+                    :payload {:type "broadcast"
+                              :event "typing"
+                              :payload {:user "a"}
+                              :meta {:replayed true :id "abc"}}}))
+      (is (= {:user "a" :meta {:replayed true :id "abc"}} @captured))
+      (finally (conn/disconnect conn)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Dispatch: presence
 ;; ---------------------------------------------------------------------------

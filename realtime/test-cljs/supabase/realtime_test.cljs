@@ -101,6 +101,26 @@
           (is (= "typing" (get-in frame [:payload :event])))
           (is (= {:user "alice"} (get-in frame [:payload :payload]))))))))
 
+(deftest broadcast-replay-test
+  (testing "replay passes through on a private channel join"
+    (with-conn
+      (fn [conn rt]
+        (let [ch (rt/channel conn "room:lobby"
+                             {:config {:private true
+                                       :broadcast {:replay {:since 1700000000000
+                                                            :limit 10}}}})]
+          ((:open rt))
+          (rt/subscribe ch)
+          (is (= {:since 1700000000000 :limit 10}
+                 (get-in (last-sent-frame rt) [:payload :config :broadcast :replay])))))))
+  (testing "replay on a public channel is rejected"
+    (with-conn
+      (fn [conn _]
+        (let [res (rt/channel conn "room:lobby"
+                              {:config {:broadcast {:replay {:since 1700000000000}}}})]
+          (is (error/anomaly? res))
+          (is (= :replay-on-public-channel (:supabase/code res))))))))
+
 (deftest broadcast-with-ack-test
   (async done
          (with-conn
