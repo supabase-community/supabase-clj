@@ -734,6 +734,7 @@
              "cache-control" (str "max-age=" cache-control)
              "x-upsert" (str upsert)}
       (metadata->header (:metadata opts)) (assoc "x-metadata" (metadata->header (:metadata opts)))
+      (seq (:content-encoding opts)) (assoc "content-encoding" (:content-encoding opts))
       (:headers opts) (merge (:headers opts)))))
 
 (defn upload
@@ -744,6 +745,8 @@
 
   * `:content-type` — defaults to `\"text/plain;charset=UTF-8\"`
   * `:cache-control` — number of seconds (default `\"3600\"`)
+  * `:content-encoding` — e.g. `\"gzip\"`; sent as the `content-encoding`
+    request header (only when present)
   * `:upsert` — overwrite if the object exists (default false)
   * `:metadata` — map of string→string stored as object metadata
   * `:headers` — extra HTTP headers"

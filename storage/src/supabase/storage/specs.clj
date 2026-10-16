@@ -151,6 +151,7 @@
              {:closed true}
              [:cache-control {:optional true} :string]
              [:content-type {:optional true} :string]
+             [:content-encoding {:optional true} :string]
              [:upsert {:optional true} :boolean]
              [:metadata {:optional true} [:map-of :string :string]]
              [:headers {:optional true} [:map-of :string :string]]]))
