@@ -68,9 +68,9 @@
 
 (defn start-registration
   "Starts the passkey registration ceremony for the user identified by
-  `access-token`. The body carries `:challenge-id`, `:options` (W3C
+  `access-token`. The body carries `:challenge_id`, `:options` (W3C
   `PublicKeyCredentialCreationOptionsJSON`, base64url-encoded) and
-  `:expires-at`.
+  `:expires_at` (the key names are the server's wire form).
 
   Pass `:options` to `navigator.credentials.create` (see
   `supabase.auth.webauthn/deserialize-credential-creation-options`), then
@@ -97,7 +97,7 @@
   browser's own `credential.toJSON()` output); it is forwarded as-is.
 
   On success the body carries the registered passkey metadata (`:id`,
-  `:friendly-name`, `:created-at`).
+  `:friendly_name`, `:created_at`).
 
   ## Example
 
@@ -121,8 +121,8 @@
 
 (defn start-authentication
   "Starts the passkey authentication (sign-in) ceremony. The body carries
-  `:challenge-id`, `:options` (W3C `PublicKeyCredentialRequestOptionsJSON`,
-  base64url-encoded) and `:expires-at`.
+  `:challenge_id`, `:options` (W3C `PublicKeyCredentialRequestOptionsJSON`,
+  base64url-encoded) and `:expires_at`.
 
   No `access-token`: this runs before a session exists, so the request is
   authenticated with the client's API key only, mirroring auth-js.
@@ -186,8 +186,8 @@
 (defn list
   "Lists the passkeys registered for the user identified by `access-token`.
 
-  On success the body is a vector of passkeys (`:id`, `:friendly-name`,
-  `:created-at`, `:last-used-at`) — see `supabase.auth.specs/Passkey`.
+  On success the body is a vector of passkeys (`:id`, `:friendly_name`,
+  `:created_at`, `:last_used_at`) — see `supabase.auth.specs/Passkey`.
 
   ## Example
 

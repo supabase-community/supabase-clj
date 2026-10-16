@@ -460,9 +460,9 @@
   (m/schema [:map
              {:closed true}
              [:id :string]
-             [:friendly-name {:optional true} [:maybe :string]]
-             [:created-at :string]
-             [:last-used-at {:optional true} [:maybe :string]]]))
+             [:friendly_name {:optional true} [:maybe :string]]
+             [:created_at :string]
+             [:last_used_at {:optional true} [:maybe :string]]]))
 
 (def PasskeyStartAuthentication
   "Schema for `passkey/start-authentication` options."
