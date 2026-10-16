@@ -6,8 +6,10 @@
   (`verify-otp`, `refresh-session`, `update-user`, `resend`,
   `reset-password-for-email`, `exchange-code-for-session`, `reauthenticate`,
   `get-claims`, identity linking), user OAuth grant management
-  (`list-oauth-grants`, `revoke-oauth-grant`) and server observability
-  (`get-server-health`, `get-server-settings`).
+  (`list-oauth-grants`, `revoke-oauth-grant`), OAuth 2.1 server consent
+  (`get-authorization-details`, `approve-authorization`,
+  `deny-authorization`) and server observability (`get-server-health`,
+  `get-server-settings`).
 
   See `supabase.auth.admin` for the service-role admin API.
 
@@ -48,6 +50,7 @@
 (def ^:private identities-authorize-uri "/user/identities/authorize")
 (def ^:private identities-uri "/user/identities")
 (def ^:private oauth-grants-uri "/user/oauth/grants")
+(def ^:private oauth-authorizations-uri "/oauth/authorizations")
 
 (defn- snake-keys [m]
   (when m
@@ -678,6 +681,110 @@
           (http/with-query {"client_id" client-id})
           (errors/with-auth-errors)
           exec)))
+
+;; ---------------------------------------------------------------------------
+;; OAuth 2.1 server consent
+;; ---------------------------------------------------------------------------
+
+(defn- consent-request [client access-token authorization-id action]
+  (-> (http/request client)
+      (http/with-method :post)
+      (http/with-service-url :auth-url
+        (str oauth-authorizations-uri "/" authorization-id "/consent"))
+      (with-auth access-token)
+      (http/with-body {:action action})
+      (errors/with-auth-errors)))
+
+#?(:clj
+   (defn- handle-consent-response
+     "Returns the consent response unchanged: the JVM has no browser to
+     redirect."
+     [resp _opts]
+     resp)
+   :cljs
+   (defn- handle-consent-response
+     "Returns the consent response unchanged. When the body carries a
+     `:redirect_url` and `:skip-browser-redirect` was not set, navigates
+     the browser there first, mirroring auth-js."
+     [resp opts]
+     (do (when (and (not (error/anomaly? resp))
+                    (not (:skip-browser-redirect opts))
+                    (exists? js/window)
+                    (string? (get-in resp [:body :redirect_url])))
+           (js/window.location.assign (get-in resp [:body :redirect_url])))
+         resp)))
+
+(defn get-authorization-details
+  "Retrieves details about a pending OAuth authorization request
+  `authorization-id`: the requesting OAuth client, the requested scopes and
+  user information. Only relevant when the OAuth 2.1 server is enabled in
+  Supabase Auth.
+
+  If the body carries only a `:redirect_url`, consent was already given and
+  the caller should handle the redirect manually.
+
+  ## Example
+
+      (get-authorization-details client \"<access-token>\" \"<authorization-id>\")"
+  [client access-token authorization-id]
+  (or (some-> (client/ensure-client client) resolve-when)
+      (-> (http/request client)
+          (http/with-method :get)
+          (http/with-service-url :auth-url
+            (str oauth-authorizations-uri "/" authorization-id))
+          (with-auth access-token)
+          (errors/with-auth-errors)
+          exec)))
+
+(defn approve-authorization
+  "Approves a pending OAuth authorization request `authorization-id` on
+  behalf of the user identified by `access-token`. Only relevant when the
+  OAuth 2.1 server is enabled in Supabase Auth.
+
+  On success the body carries the `:redirect_url` the authorization flow
+  continues at. Unlike auth-js, this function never redirects on its own —
+  there is no browser to navigate on the JVM — it always returns the
+  response for the caller to act on. On ClojureScript, `opts` may carry
+  `:skip-browser-redirect true` to suppress the automatic
+  `window.location.assign` (the default mirrors auth-js and redirects when
+  a `:redirect_url` is present).
+
+  ## Example
+
+      (approve-authorization client \"<access-token>\" \"<authorization-id>\")"
+  ([client access-token authorization-id]
+   (approve-authorization client access-token authorization-id {}))
+  ([client access-token authorization-id opts]
+   (or (some-> (client/ensure-client client) resolve-when)
+       (some-> (specs/ensure-valid specs/OAuthConsent opts) resolve-when)
+       (let [req (consent-request client access-token authorization-id "approve")]
+         #?(:clj  (handle-consent-response (exec req) opts)
+            :cljs (.then (exec req) #(handle-consent-response % opts)))))))
+
+(defn deny-authorization
+  "Denies a pending OAuth authorization request `authorization-id` on
+  behalf of the user identified by `access-token`. Only relevant when the
+  OAuth 2.1 server is enabled in Supabase Auth.
+
+  On success the body carries the `:redirect_url` the authorization flow
+  continues at. Unlike auth-js, this function never redirects on its own —
+  there is no browser to navigate on the JVM — it always returns the
+  response for the caller to act on. On ClojureScript, `opts` may carry
+  `:skip-browser-redirect true` to suppress the automatic
+  `window.location.assign` (the default mirrors auth-js and redirects when
+  a `:redirect_url` is present).
+
+  ## Example
+
+      (deny-authorization client \"<access-token>\" \"<authorization-id>\")"
+  ([client access-token authorization-id]
+   (deny-authorization client access-token authorization-id {}))
+  ([client access-token authorization-id opts]
+   (or (some-> (client/ensure-client client) resolve-when)
+       (some-> (specs/ensure-valid specs/OAuthConsent opts) resolve-when)
+       (let [req (consent-request client access-token authorization-id "deny")]
+         #?(:clj  (handle-consent-response (exec req) opts)
+            :cljs (.then (exec req) #(handle-consent-response % opts)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Server observability

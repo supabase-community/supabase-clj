@@ -24,6 +24,8 @@
       (mfa/generate-recovery-codes client token)       ;; show codes once
       (mfa/get-recovery-codes-status client token)     ;; remaining count
       (mfa/verify-recovery-code client token {:code \"K4M9-X7QP-2AB8-HT3Z\"})
+      (mfa/regenerate-recovery-codes client token)     ;; replaces the set
+      (mfa/unenroll-recovery-codes client token)       ;; remove the factor
 
   Each function returns `{:status :body :headers}` on success or an anomaly
   map on failure. On ClojureScript every function returns a `js/Promise` of
@@ -358,5 +360,44 @@
           (http/with-service-url :auth-url (str recovery-codes-uri "/verify"))
           (with-auth access-token)
           (http/with-body (snake-keys params))
+          (errors/with-auth-errors)
+          exec)))
+
+(defn regenerate-recovery-codes
+  "Generates a fresh set of recovery codes, replacing the user's current
+  set. The plaintext `:codes` in the response body are returned exactly
+  once and cannot be retrieved again; present them to the user for
+  safe-keeping. Any code from the previous set stops working.
+
+  Experimental: requires recovery codes to be enabled on the server.
+
+  ## Example
+
+      (regenerate-recovery-codes client \"<access-token>\")"
+  [client access-token]
+  (or (some-> (client/ensure-client client) resolve-when)
+      (-> (http/request client)
+          (http/with-method :post)
+          (http/with-service-url :auth-url (str recovery-codes-uri "/regenerate"))
+          (with-auth access-token)
+          (errors/with-auth-errors)
+          exec)))
+
+(defn unenroll-recovery-codes
+  "Removes the user's recovery codes factor. Permanent; the current set
+  stops working and the user no longer has recovery codes until they
+  generate a new one with `generate-recovery-codes`.
+
+  Experimental: requires recovery codes to be enabled on the server.
+
+  ## Example
+
+      (unenroll-recovery-codes client \"<access-token>\")"
+  [client access-token]
+  (or (some-> (client/ensure-client client) resolve-when)
+      (-> (http/request client)
+          (http/with-method :delete)
+          (http/with-service-url :auth-url recovery-codes-uri)
+          (with-auth access-token)
           (errors/with-auth-errors)
           exec)))
