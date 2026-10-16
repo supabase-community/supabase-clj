@@ -38,6 +38,30 @@
     (is (= :postgrest (:service req)))
     (is (= (str db-url "/users") (:url req)))))
 
+(deftest from-opts-land-on-request
+  (let [req (pg/from test-client "users"
+                     {:headers {"x-trace" "t1"}
+                      :schema "billing"
+                      :timeout 5000})]
+    (is (= "t1" (get-in req [:headers "x-trace"])))
+    (is (= "billing" (get-in req [:client :db :schema])))
+    (is (= 5000 (:timeout req)))))
+
+(deftest from-opts-schema-drives-profile-header
+  (let [[_ req] (run-with-capture
+                 #(-> (pg/from test-client "users" {:schema "billing"})
+                      (pg/select "*")
+                      (pg/execute)))]
+    (is (= "billing" (get-in req [:headers "accept-profile"])))))
+
+(deftest from-empty-opts-match-two-arity
+  (is (= (pg/from test-client "users" {})
+         (pg/from test-client "users"))))
+
+(deftest from-invalid-opts-are-anomaly
+  (is (error/anomaly? (pg/from test-client "users" {:unknown true})))
+  (is (error/anomaly? (pg/from test-client "users" {:timeout "soon"}))))
+
 ;; ---------------------------------------------------------------------------
 ;; select
 ;; ---------------------------------------------------------------------------
