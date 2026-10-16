@@ -210,6 +210,28 @@
       (is (= {:user "a" :meta {:replayed true :id "abc"}} @captured))
       (finally (conn/disconnect conn)))))
 
+(deftest broadcast-meta-on-non-map-payload-is-ignored
+  ;; Broadcast payloads are arbitrary JSON; a replayed message whose
+  ;; payload is not a map must dispatch unchanged, not throw on assoc.
+  (let [[conn rt] (connect-test)
+        captured (atom nil)]
+    (try
+      ((:open rt))
+      (conn/upsert-channel! conn "realtime:r" {})
+      (conn/add-binding! conn "realtime:r"
+                         {:type :broadcast
+                          :filter {:event "typing"}
+                          :callback #(reset! captured %)})
+      ((:feed rt) (proto/encode
+                   {:topic "realtime:r"
+                    :event "broadcast"
+                    :payload {:type "broadcast"
+                              :event "typing"
+                              :payload [1 2 3]
+                              :meta {:replayed true :id "abc"}}}))
+      (is (= [1 2 3] @captured))
+      (finally (conn/disconnect conn)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Dispatch: presence
 ;; ---------------------------------------------------------------------------
