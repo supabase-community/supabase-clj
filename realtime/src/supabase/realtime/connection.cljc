@@ -375,7 +375,15 @@
   (let [topic (:topic frame)
         inner (:payload frame)
         event (:event inner)
-        inner-payload (:payload inner)
+        ;; replayed broadcasts (channel joined with `broadcast.replay`)
+        ;; carry the server's `meta` map (`{:replayed bool ...}`); attach
+        ;; it to the dispatched payload — mirroring realtime-js exposing
+        ;; `meta.replayed` — instead of dropping it with the frame wrapper.
+        ;; Only map payloads can carry the extra key: broadcast payloads
+        ;; are arbitrary JSON and may be scalars/vectors.
+        inner-payload (cond-> (:payload inner)
+                        (and (:meta inner) (map? (:payload inner)))
+                        (assoc :meta (:meta inner)))
         bindings (:bindings (channel-state conn topic))]
     (dispatch-binding-callbacks
      bindings :broadcast

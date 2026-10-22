@@ -6,11 +6,22 @@
   (:require [malli.core :as m]
             [supabase.core.error :as error]))
 
+(def ReplayOption
+  "Schema for the broadcast `:replay` option (realtime-js `ReplayOption`).
+  `:since` is a Unix epoch in milliseconds; `:limit` optionally caps the
+  number of replayed messages. Only valid on private channels — enforced
+  by `supabase.realtime/channel`."
+  (m/schema [:map
+             {:closed true}
+             [:since :int]
+             [:limit {:optional true} :int]]))
+
 (def BroadcastConfig
   (m/schema [:map
              {:closed true}
              [:self {:optional true} :boolean]
-             [:ack {:optional true} :boolean]]))
+             [:ack {:optional true} :boolean]
+             [:replay {:optional true} #'ReplayOption]]))
 
 (def PresenceConfig
   (m/schema [:map

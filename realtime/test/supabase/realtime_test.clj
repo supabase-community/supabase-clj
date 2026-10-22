@@ -226,6 +226,43 @@
       (finally (rt/disconnect conn)))))
 
 ;; ---------------------------------------------------------------------------
+;; broadcast replay
+;; ---------------------------------------------------------------------------
+
+(deftest broadcast-replay-flows-into-join-params
+  (with-conn
+    (fn [conn rt]
+      ((:open rt))
+      (let [ch (rt/channel conn "r" {:config {:private true
+                                              :broadcast {:replay {:since 1700000000000
+                                                                   :limit 10}}}})]
+        (rt/subscribe ch))
+      (is (= {:since 1700000000000 :limit 10}
+             (get-in (last-sent-frame rt) [:payload :config :broadcast :replay]))))))
+
+(deftest broadcast-replay-rejected-on-public-channel
+  (with-conn
+    (fn [conn _]
+      (let [res (rt/channel conn "r" {:config {:broadcast {:replay {:since 1700000000000}}}})]
+        (is (error/anomaly? res))
+        (is (= :replay-on-public-channel (:supabase/code res)))
+        (is (nil? (conn/channel-state conn "realtime:r")))))))
+
+(deftest broadcast-replay-join-config-shape
+  (testing "replay rides in :broadcast; the other config defaults stay"
+    (with-conn
+      (fn [conn rt]
+        ((:open rt))
+        (let [ch (rt/channel conn "r" {:config {:private true
+                                                :broadcast {:replay {:since 1700000000000}}}})]
+          (rt/subscribe ch))
+        (let [config (get-in (last-sent-frame rt) [:payload :config])]
+          (is (= {:replay {:since 1700000000000}} (:broadcast config)))
+          (is (= "" (:key (:presence config))))
+          (is (true? (:private config)))
+          (is (empty? (:postgres_changes config))))))))
+
+;; ---------------------------------------------------------------------------
 ;; subscribe :postgres-changes-options
 ;; ---------------------------------------------------------------------------
 
