@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/supabase-community/supabase-clj/compare/auth-v0.7.0...auth-v0.8.0) (2026-10-22)
+
+
+### Features
+
+* **auth:** passkey api, oauth 2.1 server consent, recovery code regeneration ([#59](https://github.com/supabase-community/supabase-clj/issues/59)) ([a5e1f7f](https://github.com/supabase-community/supabase-clj/commit/a5e1f7f98b4bc977fbcf5b7987485c1324de6d09))
+
 ## [0.7.0](https://github.com/supabase-community/supabase-clj/compare/auth-v0.6.0...auth-v0.7.0) (2026-09-30)
 
 
