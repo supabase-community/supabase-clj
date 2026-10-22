@@ -444,6 +444,66 @@
              [:code :string]]))
 
 ;; ---------------------------------------------------------------------------
+;; Passkey schemas
+;; ---------------------------------------------------------------------------
+
+(def ^:private uuid-re
+  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+(def UUIDString
+  "Schema for a UUID string, as required by the admin passkey endpoints."
+  (m/schema [:re uuid-re]))
+
+(def Passkey
+  "Schema for a passkey in the user's passkey list (`passkey/list` and
+  `admin.passkey/list-passkeys`). Mirrors the auth-js `PasskeyListItem`."
+  (m/schema [:map
+             {:closed true}
+             [:id :string]
+             [:friendly_name {:optional true} [:maybe :string]]
+             [:created_at :string]
+             [:last_used_at {:optional true} [:maybe :string]]]))
+
+(def PasskeyStartAuthentication
+  "Schema for `passkey/start-authentication` options."
+  (m/schema [:map
+             {:closed true}
+             [:captcha-token {:optional true} [:maybe :string]]]))
+
+(def PasskeyRegistrationVerify
+  "Schema for `passkey/verify-registration` inputs. `:credential` is the
+  opaque serialized WebAuthn registration response (from
+  `webauthn/register-passkey` or `webauthn/serialize-credential-creation-response`);
+  browser objects are forwarded as-is and never validated."
+  (m/schema [:map
+             {:closed true}
+             [:challenge-id :string]
+             [:credential :any]]))
+
+(def PasskeyAuthenticationVerify
+  "Schema for `passkey/verify-authentication` inputs. `:credential` is the
+  opaque serialized WebAuthn assertion (from
+  `webauthn/sign-in-with-passkey` or
+  `webauthn/serialize-credential-request-response`); browser objects are
+  forwarded as-is and never validated."
+  (m/schema [:map
+             {:closed true}
+             [:challenge-id :string]
+             [:credential :any]]))
+
+;; ---------------------------------------------------------------------------
+;; OAuth 2.1 server consent schemas
+;; ---------------------------------------------------------------------------
+
+(def OAuthConsent
+  "Schema for `approve-authorization` / `deny-authorization` options.
+  `:skip-browser-redirect` is ClojureScript-only; on the JVM no redirect
+  ever happens."
+  (m/schema [:map
+             {:closed true}
+             [:skip-browser-redirect {:optional true} :boolean]]))
+
+;; ---------------------------------------------------------------------------
 ;; Admin OAuth client schemas
 ;; ---------------------------------------------------------------------------
 

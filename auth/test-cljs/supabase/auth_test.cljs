@@ -158,3 +158,23 @@
       (is (string? (get @backing "sb-test-auth-token")))
       (session-store/clear-session store)
       (is (nil? (session-store/load-session store))))))
+
+(deftest approve-authorization-test
+  (async done
+         (let [seen (atom nil)
+               t (fake-transport
+                  (fn [request]
+                    (reset! seen request)
+                    {:status 200 :headers {}
+                     :body "{\"redirect_url\":\"https://app.example.com/cb\"}"}))]
+           (-> (auth/approve-authorization (test-client {:transport t}) "at" "authz-1"
+                                           {:skip-browser-redirect true})
+               (.then (fn [resp]
+                        (is (= :post (:method @seen)))
+                        (is (= "https://abc.supabase.co/auth/v1/oauth/authorizations/authz-1/consent"
+                               (:url @seen)))
+                        (is (= "Bearer at" (get-in @seen [:headers "authorization"])))
+                        (is (= "{\"action\":\"approve\"}" (:body @seen)))
+                        (is (= "https://app.example.com/cb" (get-in resp [:body :redirect_url])))
+                        (done)))
+               (.catch (fn [e] (is false (str e)) (done)))))))

@@ -85,6 +85,27 @@
                         (done)))
                (.catch (fn [e] (is false (str e)) (done)))))))
 
+(deftest regenerate-and-unenroll-recovery-codes-test
+  (async done
+         (let [seen (atom [])
+               t (fake-transport
+                  (fn [request]
+                    (swap! seen conj request)
+                    (if (= :post (:method request))
+                      {:status 200 :headers {}
+                       :body "{\"id\":\"rc1\",\"type\":\"recovery_code\",\"total\":8,\"codes\":[\"AAAA-BBBB\"]}"}
+                      {:status 200 :headers {} :body ""})))]
+           (-> (mfa/regenerate-recovery-codes (test-client {:transport t}) "at")
+               (.then (fn [resp]
+                        (is (str/includes? (:url (first @seen)) "/factors/recovery-codes/regenerate"))
+                        (is (= ["AAAA-BBBB"] (get-in resp [:body :codes])))
+                        (mfa/unenroll-recovery-codes (test-client {:transport t}) "at")))
+               (.then (fn [_]
+                        (is (= :delete (:method (second @seen))))
+                        (is (str/ends-with? (:url (second @seen)) "/factors/recovery-codes"))
+                        (done)))
+               (.catch (fn [e] (is false (str e)) (done)))))))
+
 (deftest validation-anomaly-is-a-promise-test
   (async done
          (-> (mfa/enroll (test-client) "at" {})

@@ -436,6 +436,49 @@
   (is (error/anomaly? (auth/revoke-oauth-grant {} "user-tok" "client-1"))))
 
 ;; ---------------------------------------------------------------------------
+;; OAuth 2.1 server consent
+;; ---------------------------------------------------------------------------
+
+(deftest get-authorization-details-test
+  (let [[_ req] (run-with-capture
+                 #(auth/get-authorization-details test-client "user-tok" "authz-1"))]
+    (is (= :get (:method req)))
+    (is (= (str base-url "/auth/v1/oauth/authorizations/authz-1") (:url req)))
+    (is (= "Bearer user-tok" (get-in req [:headers "authorization"])))))
+
+(deftest approve-authorization-test
+  (testing "posts the approve action to the consent endpoint"
+    (let [[_ req] (run-with-capture
+                   #(auth/approve-authorization test-client "user-tok" "authz-1"))]
+      (is (= :post (:method req)))
+      (is (= (str base-url "/auth/v1/oauth/authorizations/authz-1/consent") (:url req)))
+      (is (= "Bearer user-tok" (get-in req [:headers "authorization"])))
+      (is (= "approve" (get (parse-body req) "action")))))
+  (testing "accepts options"
+    (let [[_ req] (run-with-capture
+                   #(auth/approve-authorization test-client "user-tok" "authz-1"
+                                                {:skip-browser-redirect true}))]
+      (is (= "approve" (get (parse-body req) "action"))))))
+
+(deftest deny-authorization-test
+  (let [[_ req] (run-with-capture
+                 #(auth/deny-authorization test-client "user-tok" "authz-1"))]
+    (is (= :post (:method req)))
+    (is (= (str base-url "/auth/v1/oauth/authorizations/authz-1/consent") (:url req)))
+    (is (= "deny" (get (parse-body req) "action")))))
+
+(deftest oauth-consent-validation-test
+  (testing "invalid client"
+    (is (error/anomaly? (auth/get-authorization-details {} "user-tok" "authz-1")))
+    (is (error/anomaly? (auth/approve-authorization {} "user-tok" "authz-1")))
+    (is (error/anomaly? (auth/deny-authorization {} "user-tok" "authz-1"))))
+  (testing "invalid options"
+    (is (error/anomaly? (auth/approve-authorization test-client "user-tok" "authz-1"
+                                                    {:skip-browser-redirect "yes"})))
+    (is (error/anomaly? (auth/deny-authorization test-client "user-tok" "authz-1"
+                                                 {:bogus true})))))
+
+;; ---------------------------------------------------------------------------
 ;; server observability
 ;; ---------------------------------------------------------------------------
 

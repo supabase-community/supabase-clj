@@ -278,3 +278,26 @@
   (is (error/anomaly? (mfa/verify-recovery-code test-client token {})))
   (is (error/anomaly? (mfa/verify-recovery-code test-client token {:code 42})))
   (is (error/anomaly? (mfa/verify-recovery-code {} token {:code "x"}))))
+
+(deftest regenerate-recovery-codes-test
+  (let [[resp req] (run-with-capture
+                    #(mfa/regenerate-recovery-codes test-client token)
+                    {:status 200 :headers {}
+                     :body {:id "f-rc" :type "recovery_code"
+                            :total 8 :codes ["CCCC-DDDD"]}})]
+    (is (= :post (:method req)))
+    (is (= (str base-url "/auth/v1/factors/recovery-codes/regenerate") (:url req)))
+    (is (= (str "Bearer " token) (get-in req [:headers "authorization"])))
+    (is (= ["CCCC-DDDD"] (get-in resp [:body :codes])))))
+
+(deftest regenerate-recovery-codes-invalid-client-test
+  (is (error/anomaly? (mfa/regenerate-recovery-codes {} token))))
+
+(deftest unenroll-recovery-codes-test
+  (let [[_ req] (run-with-capture #(mfa/unenroll-recovery-codes test-client token))]
+    (is (= :delete (:method req)))
+    (is (= (str base-url "/auth/v1/factors/recovery-codes") (:url req)))
+    (is (= (str "Bearer " token) (get-in req [:headers "authorization"])))))
+
+(deftest unenroll-recovery-codes-invalid-client-test
+  (is (error/anomaly? (mfa/unenroll-recovery-codes {} token))))
