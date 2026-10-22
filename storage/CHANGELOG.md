@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.6.0...storage-v0.7.0) (2026-10-22)
+
+
+### Features
+
+* **storage:** support content-encoding on uploads ([#60](https://github.com/supabase-community/supabase-clj/issues/60)) ([3b184af](https://github.com/supabase-community/supabase-clj/commit/3b184afbd36938092de9c71f963d677ff7d77f72))
+
 ## [0.6.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.5.0...storage-v0.6.0) (2026-09-22)
 
 
