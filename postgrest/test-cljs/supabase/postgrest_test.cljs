@@ -38,6 +38,21 @@
     (testing "HEAD select by default (count only)"
       (is (= :head (:method req))))))
 
+(deftest from-opts-test
+  (testing "per-request options land on the request"
+    (let [req (pg/from (test-client) "users"
+                       {:headers {"x-trace" "t1"}
+                        :schema "billing"
+                        :timeout 5000})]
+      (is (= "t1" (get-in req [:headers "x-trace"])))
+      (is (= "billing" (get-in req [:client :db :schema])))
+      (is (= 5000 (:timeout req)))))
+  (testing "invalid opts are an anomaly"
+    (is (error/anomaly? (pg/from (test-client) "users" {:unknown true}))))
+  (testing "empty opts match the two-arity call"
+    (is (= (pg/from (test-client) "users" {})
+           (pg/from (test-client) "users")))))
+
 (deftest execute-test
   (async done
          (let [seen (atom nil)

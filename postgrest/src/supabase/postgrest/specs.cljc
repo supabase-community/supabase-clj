@@ -65,6 +65,13 @@
              {:closed true}
              [:as {:optional true} :string]]))
 
+(def FromOpts
+  (m/schema [:map
+             {:closed true}
+             [:headers {:optional true} [:map-of :string :string]]
+             [:schema {:optional true} :string]
+             [:timeout {:optional true} pos-int?]]))
+
 (def MediaType
   (m/schema [:enum :default :csv :json :openapi :postgis
              :pgrst-plan :pgrst-object :pgrst-array]))

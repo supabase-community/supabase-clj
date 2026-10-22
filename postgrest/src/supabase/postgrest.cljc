@@ -54,6 +54,7 @@
             [supabase.postgrest.filters :as filters]
             [supabase.postgrest.query :as query]
             [supabase.postgrest.rls :as rls]
+            [supabase.postgrest.specs :as specs]
             [supabase.postgrest.transform :as transform])
   #?(:clj (:import (java.util.concurrent CancellationException CompletableFuture))))
 
@@ -61,15 +62,46 @@
 ;; Entry points
 ;; ---------------------------------------------------------------------------
 
+(defn- apply-from-opts
+  "Threads the mappable per-request `from` options onto the request:
+  `:headers` merge over the client's, `:schema` overrides the request
+  schema (rendered as `Accept-Profile`/`Content-Profile` at execute
+  time), `:timeout` caps the request in milliseconds."
+  [req {:keys [headers schema timeout]}]
+  (cond-> req
+    headers (http/with-headers headers)
+    schema  (assoc-in [:client :db :schema] schema)
+    timeout (http/with-timeout timeout)))
+
 (defn from
   "Starts a builder bound to `table`. Returns a request map you can
   thread through filters / verbs / transforms before calling `execute`.
-  Returns an anomaly if the client is invalid."
-  [c table]
-  (or (client/ensure-client c)
-      (-> (http/request c)
-          (http/with-service-url :database-url (str "/" table))
-          (assoc :service :postgrest))))
+  Returns an anomaly if the client or `opts` are invalid.
+
+  `opts` are per-request overrides, mirroring supabase-js
+  `.from(table, options)`:
+
+    * `:headers`: extra headers, merged over the client's.
+    * `:schema`: overrides the schema for this request only; rendered as
+      the `Accept-Profile` (reads) / `Content-Profile` (mutations)
+      header. Same as threading [[schema]].
+    * `:timeout`: per-request timeout in milliseconds.
+
+  supabase-js also takes `fetch`, `wrapFetch`, `urlLengthLimit` and
+  `retry` here; none of those map onto this SDK's transport: retry is
+  already first-class per request via [[with-retries]] (and the
+  client's `:retries`), and swapping the fetch implementation is a
+  browser concern the transport seam
+  (`supabase.core.http/with-transport`) replaces."
+  ([c table]
+   (from c table {}))
+  ([c table opts]
+   (or (client/ensure-client c)
+       (specs/ensure-valid specs/FromOpts opts)
+       (-> (http/request c)
+           (http/with-service-url :database-url (str "/" table))
+           (assoc :service :postgrest)
+           (apply-from-opts opts)))))
 
 (defn schema
   "Override the schema used for THIS request only. Defaults to the
