@@ -428,6 +428,24 @@
                  #(storage/upload (valid-storage) "a.txt" "hi"))]
     (is (not (contains? (:headers req) "x-metadata")))))
 
+(deftest upload-content-encoding-test
+  (let [[_ req] (run-with-capture
+                 #(storage/upload (valid-storage) "a.txt" "hi"
+                                  {:content-encoding "gzip"}))]
+    (is (= "gzip" (get-in req [:headers "content-encoding"])))))
+
+(deftest upload-no-content-encoding-header-test
+  (let [[_ req] (run-with-capture
+                 #(storage/upload (valid-storage) "a.txt" "hi"))]
+    (is (not (contains? (:headers req) "content-encoding")))))
+
+(deftest upload-headers-override-content-encoding-test
+  (let [[_ req] (run-with-capture
+                 #(storage/upload (valid-storage) "a.txt" "hi"
+                                  {:content-encoding "gzip"
+                                   :headers {"content-encoding" "br"}}))]
+    (is (= "br" (get-in req [:headers "content-encoding"])))))
+
 ;; ---------------------------------------------------------------------------
 ;; update (replace)
 ;; ---------------------------------------------------------------------------
@@ -442,6 +460,12 @@
     (is (= "text/plain" (get-in req [:headers "content-type"])))
     (is (= "true" (get-in req [:headers "x-upsert"])))
     (is (identical? bytes (:body req)))))
+
+(deftest update-content-encoding-test
+  (let [[_ req] (run-with-capture
+                 #(storage/update (valid-storage) "a.txt" "new"
+                                  {:content-encoding "gzip"}))]
+    (is (= "gzip" (get-in req [:headers "content-encoding"])))))
 
 (deftest update-invalid-body-test
   (is (error/anomaly? (storage/update (valid-storage) "p" 123))))
@@ -484,6 +508,13 @@
     (is (= "tok-xyz" (get-in req [:query "token"])))
     (is (= "image/png" (get-in req [:headers "content-type"])))
     (is (identical? bytes (:body req)))))
+
+(deftest upload-to-signed-url-content-encoding-test
+  (let [[_ req] (run-with-capture
+                 #(storage/upload-to-signed-url (valid-storage) "a.png" "tok"
+                                                (.getBytes "data")
+                                                {:content-encoding "gzip"}))]
+    (is (= "gzip" (get-in req [:headers "content-encoding"])))))
 
 (deftest upload-to-signed-url-invalid-body-test
   (is (error/anomaly?
