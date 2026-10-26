@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/supabase-community/supabase-clj/compare/realtime-v1.5.0...realtime-v1.6.0) (2026-10-22)
+
+
+### Features
+
+* **realtime:** broadcast replay on private channels ([#61](https://github.com/supabase-community/supabase-clj/issues/61)) ([f341deb](https://github.com/supabase-community/supabase-clj/commit/f341debe7b01e5ae574c7f053a736c611179c282))
+
 ## [1.5.0](https://github.com/supabase-community/supabase-clj/compare/realtime-v1.4.0...realtime-v1.5.0) (2026-09-30)
 
 
