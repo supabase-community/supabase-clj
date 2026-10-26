@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.5.0...postgrest-v1.6.0) (2026-10-22)
+
+
+### Features
+
+* **postgrest:** per-request options on from ([#62](https://github.com/supabase-community/supabase-clj/issues/62)) ([5cb8ef2](https://github.com/supabase-community/supabase-clj/commit/5cb8ef272af7e1b4f99b6d216660b686b953c4b7))
+
 ## [1.5.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.4.0...postgrest-v1.5.0) (2026-09-30)
 
 
