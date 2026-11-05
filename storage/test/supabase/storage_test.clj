@@ -4,7 +4,9 @@
             [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.core.http :as http]
-            [supabase.storage :as storage]))
+            [supabase.core.transport :as transport]
+            [supabase.storage :as storage])
+  (:import (java.util.concurrent CompletableFuture)))
 
 (def base-url "https://abc123.supabase.co")
 (def api-key "test-api-key")
@@ -61,7 +63,10 @@
   (let [[result req] (run-with-capture #(storage/list-buckets test-client))]
     (is (= 200 (:status result)))
     (is (= :get (:method req)))
-    (is (= (str storage-url "/bucket") (:url req)))))
+    (is (= (str storage-url "/bucket") (:url req)))
+    (is (contains? (get-in req [:client :client-info]) "supabase-clj-storage"))
+    (is (= (client/format-client-info (get-in req [:client :client-info]))
+           (get-in req [:headers "x-client-info"])))))
 
 (deftest get-bucket-request-test
   (let [[_ req] (run-with-capture #(storage/get-bucket test-client "avatars"))]
@@ -876,13 +881,39 @@
 (deftest storage-error-parser-test
   (testing "prefers API message field"
     (let [a (#'supabase.storage/storage-error-parser
-             404 {:message "Object not found" :statusCode "404"} nil :storage)]
+             404 {:message "Object not found" :statusCode "404"}
+             {"retry-after" "0"} :storage)]
       (is (error/anomaly? a))
       (is (= "Object not found" (:cognitect.anomalies/message a)))
-      (is (= :storage (:supabase/service a)))))
+      (is (= :storage (:supabase/service a)))
+      (is (= {"retry-after" "0"} (:http/headers a)))))
   (testing "falls back to status-derived message"
     (let [a (#'supabase.storage/storage-error-parser 500 nil nil :storage)]
       (is (error/anomaly? a)))))
+
+(deftest storage-honors-retry-after-test
+  (let [calls (atom 0)
+        events (atom [])
+        response (fn []
+                   (if (= 1 (swap! calls inc))
+                     {:status 503
+                      :body "{\"message\":\"try again\"}"
+                      :headers {"retry-after" "0"}}
+                     {:status 200 :body "[]" :headers {}}))
+        t (reify transport/Transport
+            (execute [_ _] (response))
+            (execute-async [_ _] (CompletableFuture/completedFuture (response))))
+        c (assoc (client/make-client base-url api-key
+                                     :retries {:max-attempts 2
+                                               :initial-delay-ms 1000
+                                               :max-delay-ms 1000}
+                                     :on-event #(swap! events conj %))
+                 :transport t)
+        result (storage/list-buckets c)
+        retry-event (first (filter #(= :request-retry (:event %)) @events))]
+    (is (= 200 (:status result)))
+    (is (= 2 @calls))
+    (is (= 0 (:delay-ms retry-event)))))
 
 (deftest requests-carry-error-parser-test
   (testing "file + bucket ops install the storage error parser"

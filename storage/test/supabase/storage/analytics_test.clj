@@ -63,7 +63,10 @@
   (let [[_ req] (run-with-capture #(analytics/list-buckets test-client))]
     (is (= :get (:method req)))
     (is (= (str storage-url "/iceberg/bucket") (:url req)))
-    (is (= {} (:query req)))))
+    (is (= {} (:query req)))
+    (is (contains? (get-in req [:client :client-info]) "supabase-clj-storage"))
+    (is (= (client/format-client-info (get-in req [:client :client-info]))
+           (get-in req [:headers "x-client-info"])))))
 
 (deftest list-buckets-opts-request-test
   (let [[_ req] (run-with-capture

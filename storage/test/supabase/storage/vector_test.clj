@@ -88,7 +88,10 @@
     (is (= (str storage-url "/vector/ListVectorBuckets") (:url req)))
     (is (= "emb" (get body "prefix")))
     (is (= 10 (get body "maxResults")))
-    (is (= "tok" (get body "nextToken")))))
+    (is (= "tok" (get body "nextToken")))
+    (is (contains? (get-in req [:client :client-info]) "supabase-clj-storage"))
+    (is (= (client/format-client-info (get-in req [:client :client-info]))
+           (get-in req [:headers "x-client-info"])))))
 
 (deftest list-buckets-defaults-test
   (let [[_ req] (run-with-capture

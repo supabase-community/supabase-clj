@@ -41,6 +41,9 @@
            (java.nio.charset StandardCharsets)
            (java.util Base64)))
 
+(def ^:private client-name "supabase-clj-storage")
+(def ^:private version "0.7.0") ;; #x-release-please-version
+
 (def ^:private bucket-uri "/bucket")
 
 (defn- bucket-path
@@ -149,16 +152,19 @@
   "Maps a Storage error response to an anomaly, preferring the API's
   `message` field for the human-readable text. Wired via
   `http/with-error-parser`."
-  [status body _headers _service]
-  (let [base (error/from-http-response status body :storage)]
+  [status body headers _service]
+  (let [base (assoc (error/from-http-response status body :storage)
+                    :http/headers headers)]
     (if-let [msg (and (map? body) (:message body))]
       (assoc base :cognitect.anomalies/message msg)
       base)))
 
 (defn with-storage-errors
-  "Installs the Storage error parser on a request."
+  "Registers Storage in `x-client-info` and installs its error parser."
   [req]
-  (http/with-error-parser req storage-error-parser))
+  (-> req
+      (http/with-client-info client-name version)
+      (http/with-error-parser storage-error-parser)))
 
 ;; ---------------------------------------------------------------------------
 ;; Bucket operations
