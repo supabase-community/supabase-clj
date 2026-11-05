@@ -47,6 +47,10 @@
     (let [req (http/request test-client)]
       (is (some? (get-in req [:headers "x-client-info"])))))
 
+  (testing "renders the current default core version in x-client-info"
+    (let [req (http/request test-client)]
+      (is (= "supabase-clj/0.8.0" (get-in req [:headers "x-client-info"])))))
+
   (testing "holds reference to client"
     (let [req (http/request test-client)]
       (is (= test-client (:client req)))))
@@ -185,6 +189,30 @@
                   (http/with-headers {"x-one" "1" "x-two" "2"}))]
       (is (= "1" (get-in req [:headers "x-one"])))
       (is (= "2" (get-in req [:headers "x-two"]))))))
+
+;; ---------------------------------------------------------------------------
+;; with-client-info
+;; ---------------------------------------------------------------------------
+
+(deftest with-client-info-test
+  (testing "adds the module to the rendered header and client map"
+    (let [req (-> (http/request test-client)
+                  (http/with-client-info "supabase-clj-auth" "0.8.0"))]
+      (is (= "supabase-clj/0.8.0; supabase-clj-auth/0.8.0"
+             (get-in req [:headers "x-client-info"])))
+      (is (= "0.8.0" (get-in req [:client :client-info "supabase-clj-auth"])))))
+  (testing "preserves an explicit global x-client-info override"
+    (let [c (client/make-client base-url api-key
+                                :global {:headers {"x-client-info" "custom/1"}})
+          req (-> (http/request c)
+                  (http/with-client-info "supabase-clj-auth" "0.8.0"))]
+      (is (= "custom/1" (get-in req [:headers "x-client-info"])))
+      (is (= "0.8.0" (get-in req [:client :client-info "supabase-clj-auth"])))))
+  (testing "preserves an explicit request x-client-info override"
+    (let [req (-> (http/request test-client)
+                  (http/with-headers {"x-client-info" "request/1"})
+                  (http/with-client-info "supabase-clj-auth" "0.8.0"))]
+      (is (= "request/1" (get-in req [:headers "x-client-info"]))))))
 
 ;; ---------------------------------------------------------------------------
 ;; with-query

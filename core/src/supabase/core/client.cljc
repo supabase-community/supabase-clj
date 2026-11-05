@@ -48,7 +48,7 @@
             [supabase.core.error :as error]
             #?@(:clj [[supabase.core.transport :as transport]])))
 
-(def ^:private version "0.7.0") ;; x-release-please-version
+(def ^:private version "0.8.0") ;; x-release-please-version
 
 ;; ---------------------------------------------------------------------------
 ;; Schemas

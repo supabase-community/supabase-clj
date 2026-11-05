@@ -175,6 +175,45 @@
   [req headers]
   (update req :headers merge headers))
 
+(defn- header-key-name [k]
+  (cond
+    (string? k) k
+    (keyword? k) (name k)
+    :else nil))
+
+(defn- has-header? [headers header-name]
+  (boolean
+   (some (fn [[k _]]
+           (= header-name (some-> (header-key-name k) str/lower-case)))
+         headers)))
+
+(defn with-client-info
+  "Registers an SDK module in this request's structured `x-client-info`
+  header and embedded client map. Existing explicit request or global
+  `x-client-info` headers are preserved.
+
+  Service modules use this to identify themselves without rebuilding a
+  request after it has been composed."
+  [req name version]
+  (let [original-client (:client req)
+        enriched-client (client/with-client-info original-client name version)
+        existing-info (some (fn [[k v]]
+                              (when (= "x-client-info"
+                                       (some-> (header-key-name k) str/lower-case))
+                                v))
+                            (:headers req))
+        original-info (client/format-client-info (:client-info original-client))
+        explicit-info? (or (has-header? (get-in original-client [:global :headers])
+                                        "x-client-info")
+                           (and (some? existing-info)
+                                (not= existing-info original-info)))
+        headers (if explicit-info?
+                  (:headers req)
+                  (assoc (:headers req)
+                         "x-client-info"
+                         (client/format-client-info (:client-info enriched-client))))]
+    (assoc req :client enriched-client :headers headers)))
+
 (defn with-query
   "Merges query parameters into the request. Later values override
   earlier ones."
