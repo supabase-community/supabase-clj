@@ -1,6 +1,6 @@
 {
   "core": "0.8.0",
-  "auth": "0.8.0",
+  "auth": "0.8.1",
   "storage": "0.7.0",
   "realtime": "1.6.0",
   "postgrest": "1.6.0",

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/supabase-community/supabase-clj/compare/auth-v0.8.0...auth-v0.8.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **auth:** register module client info ([61fbe9a](https://github.com/supabase-community/supabase-clj/commit/61fbe9abf6af8e1539d64e594611d0e1f82cd2ce))
+
 ## [0.8.0](https://github.com/supabase-community/supabase-clj/compare/auth-v0.7.0...auth-v0.8.0) (2026-10-22)
 
 
