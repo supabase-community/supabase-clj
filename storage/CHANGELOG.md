@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/supabase-community/supabase-clj/compare/storage-v0.7.0...storage-v0.7.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **storage:** preserve retry headers and register client info ([5ba0bdc](https://github.com/supabase-community/supabase-clj/commit/5ba0bdc8a01b3cfb8245be0a52504af4e514127b))
+
 ## [0.7.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.6.0...storage-v0.7.0) (2026-10-22)
 
 

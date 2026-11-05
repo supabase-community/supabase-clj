@@ -42,7 +42,7 @@
            (java.util Base64)))
 
 (def ^:private client-name "supabase-clj-storage")
-(def ^:private version "0.7.0") ;; #x-release-please-version
+(def ^:private version "0.7.1") ;; #x-release-please-version
 
 (def ^:private bucket-uri "/bucket")
 
