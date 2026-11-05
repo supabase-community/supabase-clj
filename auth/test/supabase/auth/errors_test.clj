@@ -113,4 +113,10 @@
                       #(oauth/list-clients test-client)]]]
     (let [[_ req] (run-with-capture f)]
       (is (= errors/auth-error-parser (:error-parser req))
-          (str label " request is missing the auth error parser")))))
+          (str label " request is missing the auth error parser"))
+      (let [client-info (get-in req [:client :client-info])]
+        (is (contains? client-info "supabase-clj-auth")
+            (str label " request is missing Auth client info"))
+        (is (= (client/format-client-info client-info)
+               (get-in req [:headers "x-client-info"]))
+            (str label " request has a stale x-client-info header"))))))

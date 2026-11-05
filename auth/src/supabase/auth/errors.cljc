@@ -14,6 +14,9 @@
   (:require [supabase.core.error :as error]
             [supabase.core.http :as http]))
 
+(def ^:private client-name "supabase-clj-auth")
+(def ^:private version "0.8.0") ;; #x-release-please-version
+
 (defn- body-message
   "Extracts the server's human-readable message from an error body, in the
   field order auth-js checks."
@@ -62,6 +65,8 @@
              :auth/weak-password-reasons reasons))))
 
 (defn with-auth-errors
-  "Installs the Auth error parser on a request."
+  "Registers Auth in `x-client-info` and installs the Auth error parser."
   [req]
-  (http/with-error-parser req auth-error-parser))
+  (-> req
+      (http/with-client-info client-name version)
+      (http/with-error-parser auth-error-parser)))
