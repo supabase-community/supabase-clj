@@ -50,6 +50,9 @@
             [supabase.core.json :as json]
             [supabase.functions.specs :as specs]))
 
+(def ^:private client-name "supabase-clj-functions")
+(def ^:private version "0.2.0") ;; #x-release-please-version
+
 ;; ---------------------------------------------------------------------------
 ;; Body encoding
 ;; ---------------------------------------------------------------------------
@@ -172,8 +175,9 @@
 (defn- functions-error-parser
   "Maps Edge Functions HTTP errors to anomalies with a Functions-specific
   `:supabase/code`. Used via `http/with-error-parser`."
-  [status body _headers _service]
-  (let [base (error/from-http-response status body :functions)]
+  [status body headers _service]
+  (let [base (assoc (error/from-http-response status body :functions)
+                    :http/headers headers)]
     (assoc base :supabase/code
            (case (long status)
              404 :functions-not-found
@@ -243,6 +247,7 @@
              eff-client (effective-client client opts)
              transport-as (pick-transport-as response-as)
              base-req (-> (http/request eff-client)
+                          (http/with-client-info client-name version)
                           (http/with-service-url :functions-url (str "/" function-name))
                           (http/with-method method)
                           (http/with-error-parser functions-error-parser)

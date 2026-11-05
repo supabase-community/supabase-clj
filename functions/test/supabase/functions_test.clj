@@ -42,7 +42,9 @@
       (fns/invoke c "hello")
       (is (= :post (:method @captured)))
       (is (= (str base-url "/functions/v1/hello") (:url @captured)))
-      (is (= "Bearer test-api-key" (get-in @captured [:headers "authorization"])))))
+      (is (= "Bearer test-api-key" (get-in @captured [:headers "authorization"])))
+      (is (re-find #"supabase-clj-functions/[^; ]+"
+                   (get-in @captured [:headers "x-client-info"])))))
 
   (testing "honours :method override"
     (let [[captured t] (stub-transport {:status 200 :body "{}" :headers {}})]
@@ -182,6 +184,30 @@
     (let [[_ t] (stub-transport {:status 400 :body "{\"err\":\"bad\"}" :headers {}})
           res (fns/invoke (with-transport test-client t) "x")]
       (is (= :functions-http-error (:supabase/code res)))))
+
+  (testing "Retry-After headers control retries through invoke"
+    (let [calls (atom 0)
+          events (atom [])
+          [_ t] (stub-transport
+                 (fn [_]
+                   (if (= 1 (swap! calls inc))
+                     {:status 503
+                      :body "{\"message\":\"try again\"}"
+                      :headers {"retry-after" "0"}}
+                     {:status 200
+                      :body "{}"
+                      :headers {"content-type" "application/json"}})))
+          c (assoc (client/make-client base-url api-key
+                                       :retries {:max-attempts 2
+                                                 :initial-delay-ms 1000
+                                                 :max-delay-ms 1000}
+                                       :on-event #(swap! events conj %))
+                   :transport t)
+          result (fns/invoke c "x")
+          retry-event (first (filter #(= :request-retry (:event %)) @events))]
+      (is (= 200 (:status result)))
+      (is (= 2 @calls))
+      (is (= 0 (:delay-ms retry-event)))))
 
   (testing "transport exception → fault anomaly"
     (let [t (reify transport/Transport
