@@ -50,6 +50,7 @@
   (:require [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.core.http :as http]
+            [supabase.postgrest.client-info :as client-info]
             [supabase.postgrest.error :as pg-error]
             [supabase.postgrest.filters :as filters]
             [supabase.postgrest.query :as query]
@@ -101,6 +102,7 @@
        (-> (http/request c)
            (http/with-service-url :database-url (str "/" table))
            (assoc :service :postgrest)
+           (client-info/with-postgrest-client-info)
            (apply-from-opts opts)))))
 
 (defn schema
@@ -226,6 +228,7 @@
              (-> (http/request c)
                  (http/with-service-url :database-url "/")
                  (assoc :service :postgrest)
+                 (client-info/with-postgrest-client-info)
                  (http/with-headers {"accept" "application/openapi+json"
                                      "accept-profile" (or schema
                                                           (get-in c [:db :schema] "public"))})

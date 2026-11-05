@@ -36,7 +36,10 @@
 (deftest from-sets-database-url
   (let [req (pg/from test-client "users")]
     (is (= :postgrest (:service req)))
-    (is (= (str db-url "/users") (:url req)))))
+    (is (= (str db-url "/users") (:url req)))
+    (is (contains? (get-in req [:client :client-info]) "supabase-clj-postgrest"))
+    (is (= (client/format-client-info (get-in req [:client :client-info]))
+           (get-in req [:headers "x-client-info"])))))
 
 (deftest from-opts-land-on-request
   (let [req (pg/from test-client "users"
@@ -283,7 +286,10 @@
                  #(-> (pg/rpc test-client "ping" {:n 1}) (pg/execute)))]
     (is (= :post (:method req)))
     (is (= (str db-url "/rpc/ping") (:url req)))
-    (is (= {"n" 1} (parse-body req)))))
+    (is (= {"n" 1} (parse-body req)))
+    (is (contains? (get-in req [:client :client-info]) "supabase-clj-postgrest"))
+    (is (= (client/format-client-info (get-in req [:client :client-info]))
+           (get-in req [:headers "x-client-info"])))))
 
 (deftest rpc-get-puts-args-in-query
   (let [[_ req] (run-with-capture
@@ -615,7 +621,10 @@
     (is (= "application/openapi+json" (get-in req [:headers "accept"])))
     (is (= "public" (get-in req [:headers "accept-profile"])))
     (is (= true (:retries req)) "idempotent GET picks up the default retry policy")
-    (is (= "2.0" (get-in resp [:body :swagger])))))
+    (is (= "2.0" (get-in resp [:body :swagger])))
+    (is (contains? (get-in req [:client :client-info]) "supabase-clj-postgrest"))
+    (is (= (client/format-client-info (get-in req [:client :client-info]))
+           (get-in req [:headers "x-client-info"])))))
 
 (deftest get-openapi-spec-schema-variant
   (let [[_ req] (run-with-capture

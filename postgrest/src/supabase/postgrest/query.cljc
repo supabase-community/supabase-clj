@@ -3,6 +3,7 @@
   (:refer-clojure :exclude [count max min update])
   (:require [clojure.string :as str]
             [supabase.core.http :as http]
+            [supabase.postgrest.client-info :as client-info]
             [supabase.postgrest.specs :as specs]))
 
 ;; ---------------------------------------------------------------------------
@@ -170,6 +171,7 @@
              count-alg (:count opts)
              method (cond head? :head get? :get :else :post)
              base (-> (http/request client)
+                      (client-info/with-postgrest-client-info)
                       (http/with-service-url :database-url (str "/rpc/" fn-name))
                       (assoc :service :postgrest)
                       (http/with-method method))]
