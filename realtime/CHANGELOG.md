@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/supabase-community/supabase-clj/compare/realtime-v1.6.0...realtime-v1.6.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **realtime:** use structured client info on websocket upgrades ([ec9d381](https://github.com/supabase-community/supabase-clj/commit/ec9d3816d24bd583fe9d34985c38d8ed473ea4f2))
+
 ## [1.6.0](https://github.com/supabase-community/supabase-clj/compare/realtime-v1.5.0...realtime-v1.6.0) (2026-10-22)
 
 
