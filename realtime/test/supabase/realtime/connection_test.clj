@@ -508,6 +508,9 @@
                             :on-error (fn [_] nil)})]
     (try
       (is (= "Bearer fn-token" (get (first @(:headers rt)) "Authorization")))
+      (is (contains? (get-in conn [:client :client-info]) "supabase-clj-realtime"))
+      (is (= (client/format-client-info (get-in conn [:client :client-info]))
+             (get (first @(:headers rt)) "X-Client-Info")))
       (finally (conn/disconnect conn)))))
 
 (deftest access-token-fn-failure-falls-back-to-client-token

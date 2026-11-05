@@ -15,9 +15,13 @@
   timers use `js/setInterval`/`js/setTimeout` in place of JVM executors."
   (:require [clojure.string :as str]
             #?@(:clj [[hato.websocket :as ws]])
+            [supabase.core.client :as client]
             [supabase.core.error :as error]
             [supabase.realtime.protocol :as proto])
   #?(:clj (:import (java.util.concurrent Executors ScheduledExecutorService TimeUnit))))
+
+(def ^:private client-name "supabase-clj-realtime")
+(def ^:private version "1.6.0") ;; #x-release-please-version
 
 ;; ---------------------------------------------------------------------------
 ;; Transport protocol
@@ -87,8 +91,10 @@
   "Builds WS upgrade headers for `conn`. Called per dial attempt so a
   refreshed `:access-token-fn` result is picked up on reconnect."
   [conn]
-  {"Authorization" (str "Bearer " (resolve-token conn))
-   "X-Client-Info" "supabase-realtime-clj/0.1.0"})
+  #?(:clj {"Authorization" (str "Bearer " (resolve-token conn))
+           "X-Client-Info" (client/format-client-info
+                            (:client-info (:client conn)))}
+     :cljs {}))
 
 ;; ---------------------------------------------------------------------------
 ;; Platform Transport impls
@@ -685,7 +691,8 @@
   Returns a connection map, or an anomaly on failure."
   ([client] (connect client {}))
   ([client opts]
-   (let [{:keys [on-error heartbeat-ms params transport-factory
+   (let [client (client/with-client-info client client-name version)
+         {:keys [on-error heartbeat-ms params transport-factory
                  auto-reconnect? reconnect-after-ms max-reconnect-attempts
                  access-token-fn
                  http-fallback?]

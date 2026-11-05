@@ -393,6 +393,8 @@
         (is (= :post (:method @captured)))
         (is (= "https://abc.supabase.co/realtime/v1/api/broadcast" (:url @captured)))
         (is (= "Bearer anon-key" (get-in @captured [:headers "authorization"])))
+        (is (re-find #"supabase-clj-realtime/[^; ]+"
+                     (get-in @captured [:headers "x-client-info"])))
         (is (= {:messages [{:topic "realtime:r" :event "ping" :payload {:n 1}}]}
                (proto/parse-frame (:body @captured))))))))
 
