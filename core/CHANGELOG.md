@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/supabase-community/supabase-clj/compare/core-v0.8.0...core-v0.8.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **core:** report current version in client info ([19571eb](https://github.com/supabase-community/supabase-clj/commit/19571eb0388028f93a179c96f9d9d0cc3b975223))
+
 ## [0.8.0](https://github.com/supabase-community/supabase-clj/compare/core-v0.7.0...core-v0.8.0) (2026-09-29)
 
 
