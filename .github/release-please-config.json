@@ -44,7 +44,7 @@
       "changelog-path" : "CHANGELOG.md",
       "extra-files" : [ {
         "type" : "generic",
-        "path" : "src/supabase/core/client.clj"
+        "path" : "src/supabase/core/client.cljc"
       }, {
         "type" : "generic",
         "path" : "README.md"
@@ -57,6 +57,9 @@
       "changelog-path" : "CHANGELOG.md",
       "extra-files" : [ {
         "type" : "generic",
+        "path" : "src/supabase/auth/errors.cljc"
+      }, {
+        "type" : "generic",
         "path" : "README.md"
       } ]
     },
@@ -66,6 +69,9 @@
       "component" : "storage",
       "changelog-path" : "CHANGELOG.md",
       "extra-files" : [ {
+        "type" : "generic",
+        "path" : "src/supabase/storage.clj"
+      }, {
         "type" : "generic",
         "path" : "README.md"
       } ]
@@ -77,6 +83,9 @@
       "changelog-path" : "CHANGELOG.md",
       "extra-files" : [ {
         "type" : "generic",
+        "path" : "src/supabase/realtime/connection.cljc"
+      }, {
+        "type" : "generic",
         "path" : "README.md"
       } ]
     },
@@ -87,6 +96,9 @@
       "changelog-path" : "CHANGELOG.md",
       "extra-files" : [ {
         "type" : "generic",
+        "path" : "src/supabase/postgrest/client_info.cljc"
+      }, {
+        "type" : "generic",
         "path" : "README.md"
       } ]
     },
@@ -96,6 +108,9 @@
       "component" : "functions",
       "changelog-path" : "CHANGELOG.md",
       "extra-files" : [ {
+        "type" : "generic",
+        "path" : "src/supabase/functions.cljc"
+      }, {
         "type" : "generic",
         "path" : "README.md"
       } ]
