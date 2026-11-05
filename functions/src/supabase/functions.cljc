@@ -51,7 +51,7 @@
             [supabase.functions.specs :as specs]))
 
 (def ^:private client-name "supabase-clj-functions")
-(def ^:private version "0.2.0") ;; #x-release-please-version
+(def ^:private version "0.2.1") ;; #x-release-please-version
 
 ;; ---------------------------------------------------------------------------
 ;; Body encoding
