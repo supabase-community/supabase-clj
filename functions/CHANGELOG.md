@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/supabase-community/supabase-clj/compare/functions-v0.2.0...functions-v0.2.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **functions:** preserve retry headers and register client info ([e36d719](https://github.com/supabase-community/supabase-clj/commit/e36d719fdeb7737a3d250e5c610d6f599b6052aa))
+
 ## [0.2.0](https://github.com/supabase-community/supabase-clj/compare/functions-v0.1.1...functions-v0.2.0) (2026-09-30)
 
 
