@@ -188,24 +188,24 @@
 
 (deftest format-client-info-test
   (testing "renders name/version pairs sorted by name"
-    (is (= "supabase-clj/0.7.0"
-           (client/format-client-info {"supabase-clj" "0.7.0"})))
-    (is (= "supabase-clj/0.7.0; supabase-clj-postgrest/1.3.0"
-           (client/format-client-info {"supabase-clj-postgrest" "1.3.0"
-                                       "supabase-clj" "0.7.0"})))))
+    (is (= "supabase-clj/core-test"
+           (client/format-client-info {"supabase-clj" "core-test"})))
+    (is (= "supabase-clj/core-test; supabase-clj-postgrest/pg-test"
+           (client/format-client-info {"supabase-clj-postgrest" "pg-test"
+                                       "supabase-clj" "core-test"})))))
 
 (deftest with-client-info-test
   (testing "registers a module entry on the client"
     (let [c (-> (client/make-client base-url api-key)
-                (client/with-client-info "supabase-clj-postgrest" "1.3.0"))]
-      (is (= "1.3.0" (get-in c [:client-info "supabase-clj-postgrest"])))
+                (client/with-client-info "supabase-clj-postgrest" "pg-test"))]
+      (is (= "pg-test" (get-in c [:client-info "supabase-clj-postgrest"])))
       (is (string? (get-in c [:client-info "supabase-clj"]))))))
 
 (deftest make-client-client-info-test
   (testing "user entries merge over the core default"
     (let [c (client/make-client base-url api-key
-                                :client-info {"supabase-clj-auth" "0.5.0"})]
-      (is (= "0.5.0" (get-in c [:client-info "supabase-clj-auth"])))
+                                :client-info {"supabase-clj-auth" "auth-test"})]
+      (is (= "auth-test" (get-in c [:client-info "supabase-clj-auth"])))
       (is (string? (get-in c [:client-info "supabase-clj"]))))))
 
 ;; ---------------------------------------------------------------------------
