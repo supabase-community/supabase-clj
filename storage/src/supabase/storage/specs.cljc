@@ -199,7 +199,7 @@
 (def DownloadOpts
   "Schema for download options.
 
-  * `:response-as` — `:byte-array` (default) or `:stream`
+  * `:response-as` — `:byte-array` (default); JVM also supports `:stream`
   * `:range` — `[start end]` byte range (inclusive) for partial downloads
   * `:transform` — image transformation options (renders via render/image)
   * `:cache-nonce` — value for the `cacheNonce` query param (cache busting)
@@ -208,7 +208,9 @@
   * `:headers` — extra request headers"
   (m/schema [:map
              {:closed true}
-             [:response-as {:optional true} [:enum :byte-array :stream]]
+             [:response-as {:optional true}
+              #?(:clj [:enum :byte-array :stream]
+                 :cljs [:enum :byte-array])]
              [:range {:optional true} [:tuple :int :int]]
              [:transform {:optional true} #'TransformOptions]
              [:cache-nonce {:optional true} :string]
@@ -269,13 +271,16 @@
              [:version-id {:optional true} :string]]))
 
 (def UploadBody
-  "Schema for upload body — bytes, InputStream, File, or string."
-  (m/schema [:fn {:error/message "must be byte-array, InputStream, File, or string"}
+  "Schema for upload body. The JVM accepts bytes, InputStream, File, or
+  string; ClojureScript accepts Uint8Array or string."
+  (m/schema [:fn {:error/message #?(:clj "must be byte-array, InputStream, File, or string"
+                                    :cljs "must be Uint8Array or string")}
              (fn [x]
                (or (string? x)
-                   (bytes? x)
-                   (instance? java.io.InputStream x)
-                   (instance? java.io.File x)))]))
+                   #?(:clj (or (bytes? x)
+                               (instance? java.io.InputStream x)
+                               (instance? java.io.File x))
+                      :cljs (instance? js/Uint8Array x))))]))
 
 (defn ensure-valid
   "Returns nil if `value` matches `schema`, otherwise an anomaly carrying
