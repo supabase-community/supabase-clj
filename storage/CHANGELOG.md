@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/supabase-community/supabase-clj/compare/storage-v0.7.1...storage-v0.8.0) (2026-11-16)
+
+
+### Features
+
+* **storage:** add CLJC foundation ([09de173](https://github.com/supabase-community/supabase-clj/commit/09de1731ad9e5d9fb1bec3e7ed29dce663640532))
+
 ## [0.7.1](https://github.com/supabase-community/supabase-clj/compare/storage-v0.7.0...storage-v0.7.1) (2026-11-16)
 
 
