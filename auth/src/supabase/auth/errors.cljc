@@ -15,7 +15,7 @@
             [supabase.core.http :as http]))
 
 (def ^:private client-name "supabase-clj-auth")
-(def ^:private version "0.8.0") ;; #x-release-please-version
+(def ^:private version "0.8.1") ;; #x-release-please-version
 
 (defn- body-message
   "Extracts the server's human-readable message from an error body, in the
