@@ -21,7 +21,7 @@
   #?(:clj (:import (java.util.concurrent Executors ScheduledExecutorService TimeUnit))))
 
 (def ^:private client-name "supabase-clj-realtime")
-(def ^:private version "1.6.0") ;; #x-release-please-version
+(def ^:private version "1.6.1") ;; #x-release-please-version
 
 ;; ---------------------------------------------------------------------------
 ;; Transport protocol
