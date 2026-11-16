@@ -3,7 +3,7 @@
   (:require [supabase.core.http :as http]))
 
 (def ^:private client-name "supabase-clj-postgrest")
-(def ^:private version "1.6.0") ;; #x-release-please-version
+(def ^:private version "1.6.1") ;; #x-release-please-version
 
 (defn with-postgrest-client-info
   "Registers this PostgREST package on an already-built HTTP request."

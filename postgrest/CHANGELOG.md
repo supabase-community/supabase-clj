@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.6.0...postgrest-v1.6.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **postgrest:** register module client info on all entry points ([26fa8b8](https://github.com/supabase-community/supabase-clj/commit/26fa8b8be64a5bc681cdccd3ec3ff3883045b319))
+
 ## [1.6.0](https://github.com/supabase-community/supabase-clj/compare/postgrest-v1.5.0...postgrest-v1.6.0) (2026-10-22)
 
 
